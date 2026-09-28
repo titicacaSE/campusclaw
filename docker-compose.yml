@@ -1,0 +1,31 @@
+# CampusClaw 标准启动方式（规约 NFR-02 / A10 / A11）
+#   cp .env.example .env   # 填写 SECRET_KEY
+#   docker compose up --build
+services:
+  app:
+    build: .
+    image: campusclaw:local
+    container_name: campusclaw-app
+    ports:
+      - "8080:8080"
+    # 会话签名密钥等只通过 env_file 注入，不写进镜像（NFR-01）
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /app/data/app.db
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      # down/up 后预置账号与已上传材料仍可查询（NFR-02 S3 / A11）
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+# OpenSpec 配置（CampusClaw 学期仓）
+
+# 规约的唯一事实来源；"无规约不写代码"
+project: CampusClaw
+
+# change 存放位置
+changes_dir: openspec/changes
+
+# 归档后的长期真相源
+specs_dir: openspec/specs

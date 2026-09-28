@@ -1,0 +1,4 @@
+# CampusClaw 运行依赖（规约 D1：Flask 3.x + SQLite 3 标准库）
+Flask>=3.0,<4.0
+bcrypt>=4.1
+gunicorn>=21.2

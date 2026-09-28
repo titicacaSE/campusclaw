@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>班级材料 · CampusClaw</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand"><span class="brand__mark">C</span>
+    CampusClaw<span class="brand__sub">教研智能体</span></span>
+  <span class="spacer"></span>
+  <span class="userbox">
+    {{ display_name }}
+    <span class="tag tag--{{ role }}">{{ '教师' if role == 'teacher' else '学生' }}</span>
+    <span class="hint">{{ klass }}</span>
+    <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
+      <button class="btn" type="submit" style="padding:5px 12px">退出</button>
+    </form>
+  </span>
+</header>
+
+<main class="page">
+  <div class="page-head">
+    <h1>{{ klass }} · 材料列表</h1>
+    <p>数据范围由服务端会话中的 class_id 决定：本页只展示 {{ klass }} 的材料。</p>
+  </div>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for msg in messages %}<div class="notice" style="margin-bottom:14px">{{ msg }}</div>{% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% if not can_upload %}
+  <div class="notice" style="margin-bottom:18px">
+    <b>学生账号为只读</b>：可查看与下载本班材料；上传接口对学生一律返回 403。
+  </div>
+  {% else %}
+  <section class="card">
+    <div class="card__head">上传材料到本班知识库<span class="spacer"></span>
+      <span class="hint">MVP 支持 .txt / .md</span></div>
+    <div class="card__body">
+      <form method="post" action="{{ url_for('materials.upload_form') }}" enctype="multipart/form-data">
+        <div class="grid-2">
+          <label class="field">
+            <span>文件</span>
+            <input type="file" name="file" accept=".txt,.md" required>
+          </label>
+          <div>
+            <label class="field">
+              <span>标题（可留空，默认取文件名）</span>
+              <input type="text" name="title" placeholder="例如：第 3 讲 阅读训练">
+            </label>
+            <label class="field">
+              <span>学科（可选）</span>
+              <input type="text" name="subject" placeholder="例如：语文">
+            </label>
+          </div>
+        </div>
+        <p class="hint">说明：class_id 由服务端会话决定，表单里不提供班级选择（规约 FR-03）。</p>
+        <button class="btn btn--primary" type="submit">上传并写入知识库</button>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <div class="card__head">本班材料<span class="spacer"></span>
+      <span class="hint">共 {{ materials | length }} 条</span></div>
+    {% if materials %}
+    <table>
+      <thead>
+        <tr><th>标题</th><th>学科</th><th>文件</th><th>上传者</th><th>知识库</th><th>时间</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for m in materials %}
+        <tr>
+          <td>
+            <div class="mat-title">{{ m.title }}</div>
+            <div class="mat-sub">id={{ m.id }} · class_id={{ m.class_id }}</div>
+          </td>
+          <td>{{ m.subject or '—' }}</td>
+          <td class="mat-sub">{{ m.ext }} · {{ m.size_bytes }} B</td>
+          <td class="mat-sub">{{ m.uploader_name or '—' }}</td>
+          <td class="mat-sub">{{ m.entry_count }} 条</td>
+          <td class="mat-sub mono">{{ m.created_at }}</td>
+          <td><a href="{{ url_for('materials.download', material_id=m.id) }}">下载</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">本班暂无材料{% if can_upload %}，可在上方上传第一份{% endif %}。</div>
+    {% endif %}
+  </section>
+
+  <p class="hint">
+    JSON 接口：<a href="{{ url_for('materials.api_list') }}">/api/materials</a> ·
+    <a href="/health">/health</a>（免登录）
+  </p>
+</main>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · CampusClaw</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-box">
+    <h1>CampusClaw 登录</h1>
+    <p class="hint">面向中小学的教研智能体平台 · 教研材料与知识库底座</p>
+
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+
+    <form method="post" action="{{ url_for('auth.login_post') }}" autocomplete="off">
+      <input type="hidden" name="next" value="{{ next or '' }}">
+      <label class="field">
+        <span>账号</span>
+        <input type="text" name="username" value="{{ username or '' }}" placeholder="例如 teacher_a / student_a1" required>
+      </label>
+      <label class="field">
+        <span>口令</span>
+        <input type="password" name="password" placeholder="请输入口令" required>
+      </label>
+      <button class="btn btn--primary btn--block" type="submit">登录</button>
+    </form>
+
+    <div class="demo-list">
+      演示账号（口令见仓库 README）：<br>
+      <code>teacher_a</code> 教师 A · 班级 A　<code>student_a1</code> 学生 A1 · 班级 A<br>
+      <code>teacher_b</code> 教师 B · 班级 B　<code>student_b1</code> 学生 B1 · 班级 B<br>
+      <span class="hint">健康检查：<a href="/health">/health</a>（免登录）</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

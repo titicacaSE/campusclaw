@@ -1,0 +1,22 @@
+# 运行时生成物（README「目录结构」标注为运行时生成）
+data/
+uploads/
+*.db
+*.sqlite3
+
+# 密钥与本地配置（.env.example 需保留）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# 临时产物
+.*-run.txt
+
+# 发布包（构建产物，可重新生成）
+dist/
