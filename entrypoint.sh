@@ -17,6 +17,16 @@ else
   echo "[entrypoint] 复用已有数据库 $DB_PATH（数据持久化：down/up 后记录仍在）"
 fi
 
+# 向量库集合：幂等创建。**失败不阻止启动** —— 缺向量库时 keyword 仍可用，
+# vector / hybrid 按降级语义返回 503（spec §4）。所以这里用 `||` 吞掉错误。
+if [ -n "${QDRANT_URL:-}" ]; then
+  echo "[entrypoint] 创建/校验 Qdrant 集合（$QDRANT_URL）…"
+  python scripts/init_qdrant.py ||
+    echo "[entrypoint] Qdrant 暂不可用，跳过集合初始化（keyword 模式仍可用；vector/hybrid 将返回 503）"
+else
+  echo "[entrypoint] 未配置 QDRANT_URL，跳过集合初始化（keyword 模式仍可用）"
+fi
+
 exec gunicorn \
   --bind 0.0.0.0:8080 \
   --workers "${GUNICORN_WORKERS:-2}" \

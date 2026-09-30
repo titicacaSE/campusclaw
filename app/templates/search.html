@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>检索与问答 · CampusClaw</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand"><span class="brand__mark">C</span>
+    CampusClaw<span class="brand__sub">教研智能体</span></span>
+  <span class="spacer"></span>
+  <span class="userbox">
+    <a href="{{ url_for('materials.page') }}" style="margin-right:10px">材料列表</a>
+    {{ display_name }}
+    <span class="tag tag--{{ role }}">{{ '教师' if role == 'teacher' else '学生' }}</span>
+    <span class="hint">{{ klass }}</span>
+    <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
+      <button class="btn" type="submit" style="padding:5px 12px">退出</button>
+    </form>
+  </span>
+</header>
+
+<main class="page">
+  <div class="page-head">
+    <h1>{{ klass }} · 知识库检索与问答</h1>
+    <p>
+      检索范围由服务端会话中的 class_id 决定（当前班级 {{ klass }}，{{ material_count }} 份材料 ·
+      {{ chunk_count }} 个切片）。请求体里携带的任何班级字段都会被丢弃。
+    </p>
+  </div>
+
+  <!-- 会话失效 / 服务故障 / 输入非法 的统一提示位 -->
+  <div id="alert-slot"></div>
+
+  <section class="card">
+    <div class="card__head">检索<span class="spacer"></span>
+      <span class="hint">三模式：关键词 / 向量 / 混合（RRF，k=60）</span></div>
+    <div class="card__body">
+      <form id="search-form" autocomplete="off">
+        <div class="grid-2">
+          <label class="field">
+            <span>检索词</span>
+            <input type="text" id="q" name="q" maxlength="300" placeholder="例如：记叙文 线索 倒叙">
+          </label>
+          <div>
+            <label class="field">
+              <span>模式</span>
+              <select id="mode" name="mode">
+                <option value="hybrid">混合（hybrid · 推荐）</option>
+                <option value="keyword">关键词（keyword）</option>
+                <option value="vector">向量（vector）</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>返回条数（1–20）</span>
+              <input type="number" id="limit" name="limit" min="1" max="20" value="10">
+            </label>
+          </div>
+        </div>
+        <button class="btn btn--primary" type="submit">检索</button>
+        <span class="hint" style="margin-left:10px">
+          关键词模式只查关系库；向量与混合模式需要向量库与嵌入网关可用。
+        </span>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card__head">检索状态<span class="spacer"></span>
+      <span class="hint" id="status-hint">尚未检索</span></div>
+    <div class="card__body">
+      <div id="status" class="hint">输入检索词后点击「检索」。</div>
+      <div id="hits"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card__head">基于本班资料问答<span class="spacer"></span>
+      <span class="hint">先检索、再生成；无命中时不调用大模型</span></div>
+    <div class="card__body">
+      <form id="ask-form" autocomplete="off">
+        <div class="grid-2">
+          <label class="field">
+            <span>问题</span>
+            <input type="text" id="ask-q" maxlength="300" placeholder="例如：倒叙有什么作用？">
+          </label>
+          <div style="align-self:end">
+            <button class="btn btn--primary" type="submit">提问</button>
+          </div>
+        </div>
+      </form>
+      <div id="answer-slot" style="margin-top:14px"></div>
+      <div id="citations"></div>
+      <div id="source-slot" style="margin-top:14px"></div>
+    </div>
+  </section>
+
+  <p class="hint">
+    JSON 接口：<code>/api/search</code> · <code>/api/ask</code> ·
+    <code>/api/knowledge/sources/&lt;chunk_id&gt;</code> ·
+    <code>/api/materials/&lt;id&gt;/vectors</code>
+  </p>
+</main>
+
+<script>
+/* ------------------------------------------------------------------ 渲染纪律
+   本页**只用 textContent 写文本**，不拼接标记字符串、不把服务端/模型内容当标记解析：
+   查询回显、material_title、snippet、来源正文一律按纯文本渲染，
+   因此材料正文里的 <script> / <img onerror> 等都只是文字，不会被解析执行。
+   -------------------------------------------------------------------------- */
+(function () {
+  'use strict';
+
+  var state = { hits: [], citations: [], query: '', warnings: 0 };
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function clearNode(node) {
+    while (node.firstChild) { node.removeChild(node.firstChild); }
+  }
+
+  function makeEl(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) { node.className = className; }
+    if (text !== undefined && text !== null) { node.textContent = String(text); }
+    return node;
+  }
+
+  function alertBox(kind, text) {
+    var slot = $('alert-slot');
+    clearNode(slot);
+    if (!text) { return; }
+    var box = makeEl('div', 'alert', text);
+    box.setAttribute('data-kind', kind);
+    box.style.background = kind === 'error' ? 'var(--danger-soft)' : 'var(--primary-soft)';
+    box.style.color = kind === 'error' ? 'var(--danger)' : '#1f57c9';
+    box.style.padding = '10px 13px';
+    box.style.borderRadius = '9px';
+    box.style.marginBottom = '14px';
+    slot.appendChild(box);
+  }
+
+  /* 会话失效（401/403）：把页面上的检索结果、引用、计数与查询回显一起清空 */
+  function clearAll() {
+    state.hits = [];
+    state.citations = [];
+    state.query = '';
+    state.warnings = 0;
+    clearNode($('hits'));
+    clearNode($('citations'));
+    clearNode($('answer-slot'));
+    clearNode($('source-slot'));
+    $('status').textContent = '会话已失效，检索结果已清空。';
+    $('status-hint').textContent = '会话失效';
+    $('q').value = '';
+    $('ask-q').value = '';
+  }
+
+  function renderHits() {
+    var box = $('hits');
+    clearNode(box);
+    if (!state.hits.length) { return; }
+    state.hits.forEach(function (hit, i) {
+      var row = makeEl('div', 'card__body');
+      row.style.borderTop = '1px solid var(--border)';
+
+      var title = makeEl('div', 'mat-title');
+      title.textContent = '[' + (i + 1) + '] ' + hit.material_title;   // 纯文本
+      row.appendChild(title);
+
+      var meta = makeEl('div', 'mat-sub mono');
+      meta.textContent = '切片 #' + hit.chunk_index +
+        ' · 码点 [' + hit.start_offset + ', ' + hit.end_offset + ')' +
+        ' · 行 ' + hit.line_start + '–' + hit.line_end +
+        ' · score_final=' + hit.score_final +
+        ' · rank_kw=' + (hit.rank_keyword === null ? '—' : hit.rank_keyword) +
+        ' · rank_vec=' + (hit.rank_vector === null ? '—' : hit.rank_vector);
+      row.appendChild(meta);
+
+      var snip = makeEl('div');
+      snip.style.margin = '8px 0';
+      snip.style.whiteSpace = 'pre-wrap';
+      snip.textContent = hit.snippet;                                  // 纯文本
+      row.appendChild(snip);
+
+      var links = makeEl('div', 'hint');
+      var dl = makeEl('a', null, '下载原文');
+      dl.setAttribute('href', '/api/materials/' + hit.material_id + '/download');
+      links.appendChild(dl);
+      links.appendChild(document.createTextNode(' · '));
+      var src = makeEl('button', 'btn', '查看来源切片');
+      src.type = 'button';
+      src.style.padding = '3px 10px';
+      src.addEventListener('click', function () { loadSource(hit.chunk_id); });
+      links.appendChild(src);
+      row.appendChild(links);
+
+      box.appendChild(row);
+    });
+  }
+
+  /* 来源读取：独立重新鉴权；409 表示来源已过期 —— 提示重新检索，且**不展示过期正文** */
+  function loadSource(chunkId) {
+    var slot = $('source-slot');
+    clearNode(slot);
+    slot.appendChild(makeEl('div', 'hint', '正在读取来源…'));
+
+    fetch('/api/knowledge/sources/' + chunkId, { credentials: 'same-origin' })
+      .then(function (r) {
+        return r.json().then(function (b) { return { status: r.status, body: b }; });
+      })
+      .then(function (res) {
+        clearNode(slot);
+        if (res.status === 401 || res.status === 403) {
+          clearAll();
+          alertBox('error', '会话已失效，请重新登录后再检索。');
+          return;
+        }
+        if (res.status === 409) {
+          slot.appendChild(makeEl('div', 'hint',
+            '该来源已过期（409 source_stale）：材料内容已变化，请重新检索后再查看。'));
+          return;
+        }
+        if (res.status === 404) {
+          slot.appendChild(makeEl('div', 'hint', '来源不存在（404）。'));
+          return;
+        }
+        if (res.status !== 200) {
+          slot.appendChild(makeEl('div', 'hint', '来源读取失败（HTTP ' + res.status + '）。'));
+          return;
+        }
+        var head = makeEl('div', 'mat-title', '来源：' + res.body.material_title +
+          ' · 切片 #' + res.body.chunk_index);
+        slot.appendChild(head);
+        var meta = makeEl('div', 'mat-sub mono', '码点 [' + res.body.start_offset + ', ' +
+          res.body.end_offset + ') · 行 ' + res.body.line_start + '–' + res.body.line_end);
+        slot.appendChild(meta);
+        var body = makeEl('div');
+        body.style.whiteSpace = 'pre-wrap';
+        body.style.marginTop = '6px';
+        body.textContent = res.body.body_text;      // 纯文本，不解析标签
+        slot.appendChild(body);
+      })
+      .catch(function () {
+        clearNode(slot);
+        slot.appendChild(makeEl('div', 'hint', '来源读取失败：网络异常。'));
+      });
+  }
+
+  /* 三态文案互不混淆：无命中 / 索引降级 / 服务故障 */
+  function renderSearchState(res) {
+    var status = $('status');
+    var hint = $('status-hint');
+    if (res.status === 'no_evidence') {
+      status.textContent = res.message || '资料中未找到相关内容';
+      hint.textContent = '无命中（未调用大模型）';
+      return;
+    }
+    var parts = ['命中 ' + res.returned + ' 条（本班匹配总数 ' + res.total_matched + '）'];
+    if (res.degraded) {
+      /* 降级：检索可用但部分材料索引未就绪，明确告知受影响材料数 */
+      parts.push('索引降级：本班有 ' + (res.index_warnings || []).length +
+        ' 份材料的索引未就绪，可能检索不全');
+      var detail = (res.index_warnings || [])
+        .map(function (w) { return '#' + w.material_id + ' ' + w.title + '(' + w.status + ')'; })
+        .join('；');
+      if (detail) { parts.push('受影响材料：' + detail); }
+    }
+    status.textContent = parts.join(' · ');
+    hint.textContent = res.degraded ? '部分降级' : '正常';
+  }
+
+  function handleSearchError(status, body) {
+    if (status === 401 || status === 403) {
+      clearAll();
+      alertBox('error', '会话已失效（HTTP ' + status + '），页面上的检索结果、引用与计数已清空，请重新登录。');
+      return;
+    }
+    if (status === 503) {
+      alertBox('error', '检索服务当前不可用（503 ' + (body.error || '') + '）：' +
+        (body.message || '向量库或嵌入网关不可达') +
+        '。可改用「关键词」模式，它只查关系库、不依赖向量库。');
+      return;
+    }
+    if (status === 400) {
+      alertBox('error', '输入不合法（400）：' + (body.message || '请检查检索词与条数'));
+      return;
+    }
+    alertBox('error', '检索失败（HTTP ' + status + '）：' + (body.message || '未知错误'));
+  }
+
+  function handleAskError(status, body) {
+    if (status === 401 || status === 403) {
+      clearAll();
+      alertBox('error', '会话已失效（HTTP ' + status + '），问答内容已清空，请重新登录。');
+      return;
+    }
+    if (status === 502) {
+      alertBox('error', '问答生成失败（502 ' + (body.error || 'upstream_error') + '）：' +
+        (body.message || '对话网关异常') + '。本页**不会**用本地拼凑的文字代替模型回答。');
+      return;
+    }
+    if (status === 503) {
+      alertBox('error', '问答所需的向量检索不可用（503）：' + (body.message || ''));
+      return;
+    }
+    if (status === 400) {
+      alertBox('error', '输入不合法（400）：' + (body.message || '问题不能为空'));
+      return;
+    }
+    alertBox('error', '问答失败（HTTP ' + status + '）：' + (body.message || '未知错误'));
+  }
+
+  function renderAnswer(res) {
+    var slot = $('answer-slot');
+    var citations = $('citations');
+    clearNode(slot);
+    clearNode(citations);
+    state.citations = res.citations || [];
+
+    var label = makeEl('div', 'mat-sub');
+    label.textContent = res.status === 'no_evidence'
+      ? '未在资料中找到依据（未调用大模型）'
+      : '回答（依据本班资料生成）';
+    slot.appendChild(label);
+
+    var answer = makeEl('div');
+    answer.style.whiteSpace = 'pre-wrap';
+    answer.style.marginTop = '6px';
+    answer.textContent = res.answer || '';      // 纯文本
+    slot.appendChild(answer);
+
+    if (!state.citations.length) { return; }
+    var head = makeEl('div', 'mat-sub', '引用来源（编号与回答中的 [n] 一致）：');
+    head.style.marginTop = '10px';
+    citations.appendChild(head);
+    state.citations.forEach(function (c, i) {
+      var item = makeEl('div', 'hint');
+      item.style.marginTop = '4px';
+      item.textContent = '[' + (i + 1) + '] ' + c.material_title +
+        ' · 切片 #' + c.chunk_index +
+        ' · 码点 [' + c.start_offset + ', ' + c.end_offset + ')';
+      citations.appendChild(item);
+    });
+  }
+
+  function postJSON(url, payload) {
+    return fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; })
+        .then(function (b) { return { status: r.status, ok: r.ok, body: b }; });
+    });
+  }
+
+  $('search-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    alertBox('none', '');
+    var q = $('q').value;
+    var mode = $('mode').value;
+    var limit = parseInt($('limit').value, 10);
+    if (!q.trim()) {
+      alertBox('error', '请输入检索词（空查询返回 400）。');
+      return;
+    }
+    if (!limit || limit < 1 || limit > 20) {
+      alertBox('error', '返回条数必须在 1–20 之间。');
+      return;
+    }
+    state.query = q;
+    $('status-hint').textContent = '检索中…';
+
+    postJSON('/api/search', { q: q, mode: mode, limit: limit })
+      .then(function (res) {
+        if (!res.ok) { handleSearchError(res.status, res.body); return; }
+        state.hits = res.body.hits || [];
+        state.warnings = (res.body.index_warnings || []).length;
+        renderSearchState(res.body);
+        renderHits();
+      })
+      .catch(function () { alertBox('error', '检索失败：网络异常。'); });
+  });
+
+  $('ask-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    alertBox('none', '');
+    var q = $('ask-q').value;
+    if (!q.trim()) {
+      alertBox('error', '请输入问题（空查询返回 400）。');
+      return;
+    }
+    postJSON('/api/ask', { q: q })
+      .then(function (res) {
+        if (!res.ok) { handleAskError(res.status, res.body); return; }
+        renderAnswer(res.body);
+      })
+      .catch(function () { alertBox('error', '问答失败：网络异常。'); });
+  });
+})();
+</script>
+</body>
+</html>

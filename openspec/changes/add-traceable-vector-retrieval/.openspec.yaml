@@ -2,25 +2,30 @@
 # schema 与 openspec/config.yaml 保持一致；本文件只声明本变更的元信息，不覆盖项目级配置。
 
 project: CampusClaw
-change: add-class-scoped-knowledge-search
-capability: class-knowledge-search
+change: add-traceable-vector-retrieval
+capability: traceable-vector-retrieval
 
 # 目录约定（与项目级 config.yaml 一致）
 changes_dir: openspec/changes
 specs_dir: openspec/specs
 
 # 变更状态：specified（规约完成，未实现）| implementing | verified | archived
-status: specified
+# 本轮为「规约 + 实现」同轮交付，故进入 implementing；全部验收通过后改 verified。
+status: implementing
 
 # 前置依赖（未满足时 MUST NOT 实施）
 depends_on:
   - add-auth-rbac-class-knowledge
 
+# 取代关系：早期草案在课件未发布时起草，把问答列入 Non-goals，与课件口径冲突
+supersedes:
+  - add-class-scoped-knowledge-search
+
 # 四件套产物路径（相对本变更目录）
 artifacts:
   proposal: proposal.md
   design: design.md
-  spec: specs/class-knowledge-search/spec.md
+  spec: specs/traceable-vector-retrieval/spec.md
   tasks: tasks.md
 
 # 交付纪律
@@ -29,7 +34,10 @@ rules:
   spec_first: true
   # 未全部验收通过前不得归档到 openspec/specs
   archive_requires_all_passed: true
-  # 未实施的任务保持 [ ]，不得预先勾选
-  allow_prechecked_tasks: false
+  # 本变更为「规约 + 实现」同轮交付：允许在 verify 真实通过后勾选任务。
+  # 该开关只表示「允许勾选」，不表示「已勾选」——未通过 verify 的任务 MUST 保持 [ ]。
+  allow_prechecked_tasks: true
   # 每条任务必须带可执行 verify
   require_verify_per_task: true
+  # 每条勾选的任务必须留下可复核的证据（测试输出 / 命令回显）
+  require_evidence_per_checked_task: true

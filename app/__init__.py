@@ -4,6 +4,8 @@
   - NFR-01 S3：未提供会话签名密钥时，应用启动 MUST 失败（禁止不安全默认值）。
   - NFR-02 S1/S2：标准启动为 Docker Compose；`GET /health` 免登录且不重定向。
   - FR-01 S3：未登录访问受保护资源 —— 页面 302 至 `/login`，API 返回 401 JSON。
+  - `add-traceable-vector-retrieval` T1：嵌入网关与向量库配置**缺失时不得阻止启动**，
+    读接口按降级语义响应（`keyword` 照常可用，`vector`/`hybrid` 返回 503）。
 """
 from __future__ import annotations
 
@@ -15,6 +17,20 @@ from flask import Flask, jsonify
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 MIN_SECRET_KEY_LEN = 16
+
+# 网关与向量库相关配置：只从环境变量读取，缺失时留空并降级（密钥绝不下发浏览器）
+UPSTREAM_CONFIG_KEYS = (
+    "EMBEDDING_BASE_URL",
+    "EMBEDDING_API_KEY",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_DIM",
+    "CHAT_BASE_URL",
+    "CHAT_API_KEY",
+    "CHAT_MODEL",
+    "QDRANT_URL",
+    "QDRANT_COLLECTION",
+    "QDRANT_API_KEY",
+)
 
 
 class ConfigError(RuntimeError):
@@ -39,6 +55,16 @@ def _secret_key(overrides: dict) -> str:
     return value
 
 
+def _upstream_config(overrides: dict) -> dict:
+    """网关/向量库配置：空值一律忽略，不覆盖已注入的值（T1：缺失不阻止启动）。"""
+    cfg: dict = {}
+    for key in UPSTREAM_CONFIG_KEYS:
+        value = overrides.get(key) or os.environ.get(key)
+        if value is not None and str(value).strip():
+            cfg[key] = str(value)
+    return cfg
+
+
 def create_app(**overrides) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
 
@@ -60,6 +86,7 @@ def create_app(**overrides) -> Flask:
         SESSION_COOKIE_PATH="/",
         TESTING=bool(overrides.get("TESTING", False)),
     )
+    app.config.update(_upstream_config(overrides))
     app.json.ensure_ascii = False
 
     from . import db
@@ -68,13 +95,17 @@ def create_app(**overrides) -> Flask:
     db.ensure_ready(app)
     app.teardown_appcontext(db.close_conn)
 
+    from .api_auth import bp as api_auth_bp
     from .auth import bp as auth_bp
     from .main import bp as main_bp
     from .materials import bp as materials_bp
+    from .search import bp as search_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(api_auth_bp)
     app.register_blueprint(materials_bp)
+    app.register_blueprint(search_bp)
 
     @app.errorhandler(413)
     def too_large(_err):

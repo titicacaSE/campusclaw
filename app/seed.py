@@ -226,6 +226,7 @@ def reseed(db_path, upload_dir: Path, quiet: bool = False) -> bool:
 
     删除顺序 MUST 是「先子表后父表」，否则在 `PRAGMA foreign_keys = ON` 下会触发
     FOREIGN KEY constraint failed。关键依赖：
+      knowledge_chunks.material_id  → materials（派生数据，必须先于 materials 删除）
       knowledge_entries.material_id → materials
       handouts.material_id         → materials
       skills.assistant_id          → assistants
@@ -235,11 +236,12 @@ def reseed(db_path, upload_dir: Path, quiet: bool = False) -> bool:
     conn = connect(db_path)
     try:
         for table in (
+            "knowledge_chunks",   # 派生索引，依赖 materials / classes，最先删
             "knowledge_entries",  # 依赖 materials / classes，先删
             "skills",             # 依赖 assistants
             "handouts",           # 依赖 materials / classes
             "assignments",        # 依赖 classes / users
-            "materials",          # 此时 knowledge_entries 与 handouts 已清空，可安全删除
+            "materials",          # 此时 knowledge_chunks 与 knowledge_entries / handouts 已清空
             "assistants",         # 此时 skills 已清空
             "users",              # 此时 materials / assignments / assistants 已清空
             "classes",            # 最后删（被上述所有表引用）

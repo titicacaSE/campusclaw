@@ -12,6 +12,7 @@
     CampusClaw<span class="brand__sub">教研智能体</span></span>
   <span class="spacer"></span>
   <span class="userbox">
+    <a href="{{ url_for('search.page') }}" style="margin-right:10px">检索与问答</a>
     {{ display_name }}
     <span class="tag tag--{{ role }}">{{ '教师' if role == 'teacher' else '学生' }}</span>
     <span class="hint">{{ klass }}</span>

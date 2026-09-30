@@ -1,5 +1,5 @@
 # CampusClaw 标准启动方式（规约 NFR-02 / A10 / A11）
-#   cp .env.example .env   # 填写 SECRET_KEY
+#   cp .env.example .env   # 填写 SECRET_KEY（网关与向量库键见 .env.example）
 #   docker compose up --build
 services:
   app:
@@ -14,10 +14,16 @@ services:
     environment:
       DATABASE_PATH: /app/data/app.db
       UPLOAD_DIR: /app/uploads
+      # 容器内指向同 compose 网络里的 qdrant 服务；.env 里若填了外部地址，
+      # 把下面这行注释掉即可（environment 优先级高于 env_file）
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: campusclaw_chunks
     volumes:
       # down/up 后预置账号与已上传材料仍可查询（NFR-02 S3 / A11）
       - ./data:/app/data
       - ./uploads:/app/uploads
+    depends_on:
+      - qdrant
     healthcheck:
       test:
         - CMD
@@ -29,3 +35,18 @@ services:
       retries: 6
       start_period: 20s
     restart: unless-stopped
+
+  # 向量库。**它不是启动的必要条件**：不可达时 keyword 模式照常工作，
+  # vector / hybrid 返回 503，应用不会因此起不来（spec §4 降级语义）。
+  # 卷保留索引，使 `docker compose down && up` 后无需全量回填。
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: campusclaw-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  qdrant_storage:

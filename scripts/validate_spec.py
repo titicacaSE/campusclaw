@@ -47,10 +47,22 @@ COVERAGE_CONCERNS = (
     ("历史材料回填", ("backfill_index", "回填")),
     ("前端输出转义", ("转义", "escap")),
     ("排序与结果上限", ("排序", "limit")),
-    ("溯源坐标", ("char_start", "偏移")),
+    ("溯源坐标", ("start_offset", "偏移")),
     ("分块与边界", ("分块", "chunk")),
     ("既有行为回归", ("回归",)),
     ("真实证据", ("verify",)),
+    # —— add-traceable-vector-retrieval 新增关切项 ——
+    ("三种检索模式", ("mode", "keyword", "hybrid")),
+    ("RRF 融合 k=60", ("rrf", "60")),
+    ("向量相似度阈值", ("0.35", "阈值")),
+    ("切分策略", ("chunk_strategy", "hierarchy")),
+    ("显式重建索引", ("reindex", "重建")),
+    ("index_status 状态机", ("index_status",)),
+    ("无命中不调生成模型", ("no_evidence", "固定文案")),
+    ("向量库降级 503", ("503", "qdrant")),
+    ("system 提示由服务端写入", ("system",)),
+    ("引用与 citations 顺序", ("citation",)),
+    ("网关密钥只在服务端", ("密钥", "secret")),
 )
 
 

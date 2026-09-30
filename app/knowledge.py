@@ -103,8 +103,19 @@ def persist_material(
     uploaded_by: int,
     body_text: str,
     subject: str | None = None,
+    chunk_records: list[dict] | None = None,
+    chunk_source_sha256: str | None = None,
+    chunk_strategy: str = "auto",
+    chunk_config_json: str | None = None,
 ) -> tuple[int, int]:
-    """同事务写入 materials 与 knowledge_entries（FR-04：两表各增 1 行且 class 一致）。"""
+    """同事务写入 materials、knowledge_entries 与 knowledge_chunks（FR-04 + T8）。
+
+    `chunk_records` 由 `retrieval.build_chunk_records()` 在**事务之外**算好传进来：
+    切分抛错时不会留下任何一行；三张表要么一起提交、要么一起回滚。
+    """
+    if chunk_records and chunk_source_sha256 is None:
+        raise ValueError("传入 chunk_records 时必须同时给出 chunk_source_sha256")
+
     with db.transaction():
         material_id = db.insert_material(
             title=title,
@@ -120,6 +131,16 @@ def persist_material(
         entry_id = db.insert_knowledge_entry(
             material_id=material_id, class_id=class_id, body_text=body_text, ord_=0
         )
+        if chunk_records:
+            db.replace_chunks(material_id, class_id, chunk_records)
+            # 材料行先落 indexing，向量阶段成功后再转 indexed / failed（design.md §8）
+            db.set_material_index_state(
+                material_id,
+                "indexing",
+                source_sha256=chunk_source_sha256,
+                strategy=chunk_strategy,
+                config_json=chunk_config_json,
+            )
     return material_id, entry_id
 
 
