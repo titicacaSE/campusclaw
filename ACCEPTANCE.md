@@ -449,8 +449,10 @@ python -c "from app.db import SQL_KEYWORD_SEARCH as q;assert q.index('class_id')
    `tests/http_agent_acceptance.py` 与 `tests/http_retrieval_acceptance.py`。
 2. **Docker Compose 端到端未实跑**：`docker-compose.yml` 已加 `qdrant` 服务与 `qdrant_storage` 卷，
    但缺 Docker 运行时。归档前应在有 Docker 的机器上 `docker compose up -d && docker compose ps` 留证。
-3. **A30 公网可访问**：仓库 `https://github.com/titicacaSE/campusclaw` 为 public，可匿名读取；
-   但本轮新增提交需推送后才在远端可见（见下方提交号）。
+3. **A30 公网可访问（已闭合）**：提交 `0e05097` 已推送到 `main`。匿名调用
+   `GET https://api.github.com/repos/titicacaSE/campusclaw` 返回 **200** 且 `private=false`、
+   `default_branch=main`；`/commits/main` 的 sha 前 7 位为 `0e05097`；
+   `contents/docs/AI应用平台验证报告.pdf` 匿名可取（字节数与本地产物一致）。
 4. **归档状态**：本变更四件套仍在 `openspec/changes/add-agent-platform-mcp-tools/`，
    `.openspec.yaml` 的 `status: implementing`。按规约「仍有未通过项时 MUST NOT 归档」，
    **不归档**到 `openspec/specs/agent-platform/`。上述 1、2 两项闭合后，`status` 方可改 `verified` 再归档。
