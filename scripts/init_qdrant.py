@@ -16,6 +16,11 @@ import argparse
 import sys
 from pathlib import Path
 
+# 控制台编码兜底：容器/中文 Windows 下默认 stdout 编码可能不是 UTF-8，
+# 输出中文提示时会抛 UnicodeEncodeError。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.vector_store import QdrantClient, QdrantConfig, VectorStoreUnavailable  # noqa: E402

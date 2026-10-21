@@ -30,6 +30,11 @@ import re
 import sys
 from pathlib import Path
 
+# 控制台编码兜底：中文 Windows 的默认 stdout 编码是 GBK，混合输出中文与符号时
+# 可能抛 UnicodeEncodeError，让校验脚本以「崩掉」而非「报告结论」收场。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parent.parent
 CHANGES_DIR = ROOT / "openspec" / "changes"
 
@@ -159,6 +164,7 @@ def validate_change(change_dir: Path, check_coverage: bool) -> tuple[list[str], 
         checkboxes = checked = 0
 
     # 6) .openspec.yaml：存在则校验，缺失仅告警（兼容早期变更）
+    cfg: dict = {}
     cfg_path = change_dir / ".openspec.yaml"
     if cfg_path.is_file():
         cfg = _load_min_yaml(cfg_path)
@@ -177,10 +183,20 @@ def validate_change(change_dir: Path, check_coverage: bool) -> tuple[list[str], 
         warnings.append(f"[{name}] 缺少 .openspec.yaml（建议为每个变更添加）")
 
     # 7) 覆盖检查
+    #    关切项可由 `.openspec.yaml` 的 `coverage_concerns` 覆盖（每个变更的关切面不同，
+    #    用一张全局表会把「变更二已实现的检索项」强加给「变更三的智能体/技能/MCP」）。
     if check_coverage:
+        concerns = COVERAGE_CONCERNS
+        if isinstance(cfg, dict) and isinstance(cfg.get("coverage_concerns"), (list, tuple)):
+            parsed = []
+            for item in cfg["coverage_concerns"]:
+                if isinstance(item, (list, tuple)) and len(item) == 2:
+                    parsed.append((str(item[0]), tuple(str(x) for x in item[1])))
+            if parsed:
+                concerns = tuple(parsed)
         missing = [
             label
-            for label, tokens in COVERAGE_CONCERNS
+            for label, tokens in concerns
             if not any(tok.lower() in tasks.lower() for tok in tokens)
         ]
         for label in missing:

@@ -1,11 +1,12 @@
 # CampusClaw
 
-面向中小学的教研智能体平台。仓库当前包含两个 OpenSpec 变更：
+面向中小学的教研智能体平台。仓库当前包含三个 OpenSpec 变更：
 
 | 变更 | 能力 | 状态 |
 | --- | --- | --- |
 | `add-auth-rbac-class-knowledge` | 登录、角色权限、班级隔离、材料上传与知识库入库 | **已实现并通过验收** |
 | `add-traceable-vector-retrieval` | 可溯源向量检索（三模式 + RRF）、基于本班资料的问答与引用 | **已实现并通过验收** |
+| `add-agent-platform-mcp-tools` | Bearer JWT、智能体与技能路由、自建 MCP 工具、流式问答、OpenAPI | **已实现并通过验收** |
 
 > 早期草案 `add-class-scoped-knowledge-search` 把「问答生成」列入 Non-goals，与课件口径冲突，
 > 已由 `add-traceable-vector-retrieval` **取代**（见其 `.openspec.yaml` 的 `supersedes`）。
@@ -24,6 +25,27 @@
 
 跨班访问一律被服务端拒绝：跨班检索对外是 **200 + 空结果**（不用 403/404 暗示他班资料存在），
 跨班材料详情与跨班来源读取一律 **404**。
+
+## AI 应用平台（第 5 / 6 课）
+
+在「能检索」之上再往前一步：教师把**角色提示词 + 技能 + 材料**配成一个「应用」，学生选应用提问。
+
+- **认证**：`POST /api/auth/token` 签发 **HS256 Bearer JWT**（`sub/jti/iat/exp`，**不含角色与班级**，
+  每次请求回库读）。页面链路继续走 `HttpOnly` Cookie；同时带 Cookie 与 Bearer 时 **Bearer 优先**，
+  Bearer 无效**不回落** Cookie。课件的「不用 bearer token」条款由本变更显式改写为
+  「浏览器不持有令牌、API 客户端可用 Bearer」——页面仍然不写 `localStorage`。
+- **智能体**：`name` ≤64 且班内唯一、`prompt` ≤2000（空则回退默认角色）；停用后学生列表不可见、
+  不可新建会话，但**已存在的会话不受影响**；跨班按编号直取与「不存在」同形 404。
+- **技能**：单文件定义，**空行以上是元数据、以下是说明正文**；六类不合规直接拒收（400）。
+  路由**不调模型**：本班 → 已绑定 → 已启用 三层收窄 → 切词 → 子串计分 → 取最高分，
+  **同分取编号较小者，零分不选**。解题引导命中时追加「不写得数 / 不给完整过程」的硬性要求。
+- **MCP**：仓库自带一台 MCP 服务（`POST /mcp`，JSON-RPC 2.0：`initialize` / `tools/list` / `tools/call`），
+  提供 `calculator` 与 `text_stats`。宿主只把**本次命中技能引用的工具**下发给模型，
+  轮次上限 2；未连接 → `denied`、执行出错 → `error`、成功 → `ok`，三态都写审计。
+  令牌只在服务端环境变量，`mcp_servers` 表只存变量名，接口只回 `token_configured`。
+- **流式**：`meta → delta×n → done`，`delta.text` 是**新增片段**；首事件前的错误仍是普通 4xx/5xx。
+- **纪律不变**：无命中**不调对话网关**；资料 ≤4 条 ×800 字、历史 ≤6 条 ×500 字；客户端传来的
+  `system` 一律丢弃，`system` 恒为单条五段拼接，第一段逐字等于库里的 `prompt`。
 
 ## 不做
 
@@ -64,6 +86,11 @@ export QDRANT_URL=http://127.0.0.1:6333
 export EMBEDDING_BASE_URL=... EMBEDDING_API_KEY=... EMBEDDING_MODEL=... EMBEDDING_DIM=1024
 export CHAT_MODEL=...                              # CHAT_BASE_URL/CHAT_API_KEY 留空则复用嵌入侧
 
+# 第 5/6 课：Bearer JWT 与 MCP 令牌（都只在服务端；缺 JWT_SECRET 时回落到 SECRET_KEY）
+export JWT_SECRET=$(python -c "import secrets;print(secrets.token_urlsafe(48))")
+export MCP_SERVER_TOKEN=$(python -c "import secrets;print(secrets.token_urlsafe(24))")
+export MCP_BASE_URL=http://127.0.0.1:8080          # 宿主发现工具时访问自身 /mcp
+
 python scripts/init_qdrant.py                      # 幂等建集合
 python scripts/backfill_index.py                   # 幂等回填：为已有材料补切片与向量
 python wsgi.py                                     # http://127.0.0.1:8080
@@ -87,7 +114,9 @@ python wsgi.py                                     # http://127.0.0.1:8080
 ## 状态码与隔离约定（固定取舍）
 
 - **未登录**：页面请求 `302 → /login`；`/api/**` 请求 `401 {"error":"unauthorized"}`。
-- **学生调用写接口**：`403 {"error":"forbidden"}`（消息含「无权限」）。
+  带 `Authorization: Bearer` 但无效时**一律 401**（`WWW-Authenticate: Bearer realm="campusclaw"`），
+  即使同时持有有效 Cookie 也不回落。
+- **学生调用写接口**：`403 {"error":"forbidden", "required_role":"teacher", "your_role":"student"}`。
 - **按 ID 访问跨班或不存在材料**：**统一返回 `404`**（规约 FR-03 S1 允许 403 或 404，本实现择一固定为 404）。
   理由是避免通过状态码差异枚举他人材料是否存在；响应体不含 B 班标题、正文、文件路径或存储键。
   来源端点 `GET /api/knowledge/sources/<chunk_id>` 同样如此（跨班与不存在**字节级同形**）。
@@ -123,6 +152,27 @@ python wsgi.py                                     # http://127.0.0.1:8080
 | POST | `/api/ask` | 登录 | **基于本班资料问答**：hybrid 取前 4 条 → 有命中才调对话网关 → 返回 `answer` + `citations[]` |
 | GET | `/api/knowledge/search?q=<词>&limit=<1..20>` | 登录 | 草案别名（保留旧字段名），指向 `keyword` 模式同一实现 |
 | GET | `/api/knowledge/sources/<chunk_id>` | 登录 | 来源读取：**重新鉴权 + 双条件 + 版本核对**；跨班/不存在同形 404，过期 409 |
+| POST | `/api/auth/token` | 公开 | 签发 Bearer JWT（HS256）；口令错与未知用户**同形 401** |
+| POST | `/api/auth/revoke` | Bearer | 撤销当前令牌（`jti` 入 `token_revocations`），之后同一枚令牌 401 |
+| GET | `/api/auth/me` | Bearer | 身份 + `auth_mode`；角色与班级来自库 |
+| GET | `/api/agents` | 登录 | 应用列表；学生只见 `enabled=1` |
+| POST | `/api/agents` | **教师** | 新建应用；`name` ≤64 班内唯一、`prompt` ≤2000 |
+| GET | `/api/agents/<id>` | 登录 | 应用详情；跨班/不存在/学生看已停用 —— 三者同形 404 |
+| PATCH | `/api/agents/<id>` | **教师** | 改名/改提示词/停用 |
+| PUT | `/api/agents/<id>/skills` · `/materials` | **教师** | 整体替换绑定；他班编号 404 |
+| GET | `/api/skills` · `/api/skills/<id>` | 登录 | 技能列表/详情（含三项内置） |
+| POST | `/api/skills` | **教师** | 上传技能文件；六类不合规 400、未发现的外部工具 400 `unknown_tool` |
+| PATCH | `/api/skills/<id>` | **教师** | 启停/改内容；下一次提问立即生效 |
+| POST | `/api/conversations` | 登录 | 新建会话（**锁定 `agent_id`**）；停用/跨班/不存在同形 404 |
+| GET | `/api/conversations` · `/<id>` | 登录 | 我的会话与消息（含 `citations` / `skill` / `tool_calls`） |
+| POST | `/api/conversations/<id>/ask` · `/api/ask` | 登录 | 非流式提问 |
+| POST | `/api/conversations/<id>/stream` · `/api/ask/stream` | 登录 | **SSE**：`meta → delta×n → done` |
+| GET | `/api/mcp/servers` · `/api/mcp/tools` · `/api/mcp/audit` | 登录 | 服务器、工具引用、审计（只回 `token_configured`） |
+| POST | `/api/mcp/servers` · PATCH `/<id>` · POST `/<id>/probe` | **教师** | 登记 / 启停 / 连接发现 |
+| POST | `/mcp` | **MCP 令牌** | JSON-RPC：`initialize` / `tools/list` / `tools/call` |
+| GET | `/mcp/health` | 公开 | 协议版本与工具清单；只回 `token_configured`，不回令牌 |
+| GET | `/api/openapi.json` · `/api/docs` | 公开 | OpenAPI 3.0.3 描述 + 可试调文档页（无 CDN 依赖） |
+| GET | `/agents` · `/skills` · `/mcp` · `/chat` | 登录 | 配置页与对话页 |
 
 ### 检索与问答的行为约定
 
@@ -141,8 +191,9 @@ python wsgi.py                                     # http://127.0.0.1:8080
 - **降级**：索引未就绪时返回 `degraded:true` + `index_warnings`（含受影响材料数与状态），
   **不得**返回空结果冒充「无命中」；`no_evidence` 与 `degraded` 与 `ok` 三态互不混淆。
 - **引用纪律**：`answer` 中的 `[n]` 与 `citations[n-1]` 顺序一致；越界编号不产生 citation 并记 warning。
-- **密钥纪律**：网关与向量库密钥**只在服务端**；任何响应体、页面、`localStorage` 都不出现，
-  页面也不直连 Qdrant、不使用 bearer token（会话只由 `HttpOnly` + `SameSite=Lax` Cookie 承载）。
+- **密钥纪律**：网关、向量库与 MCP 令牌**只在服务端**；任何响应体、页面、`localStorage` 都不出现，
+  页面也不直连 Qdrant。**页面链路不持有任何令牌**（会话只由 `HttpOnly` + `SameSite=Lax` Cookie 承载）；
+  Bearer JWT 只用于 API 客户端与接口测试。
 
 ### 与课件的偏离声明
 
@@ -172,6 +223,16 @@ app/
   retrieval.py         # 三模式检索 + RRF + 阈值 + 输入校验 + 结果模型
   qa.py                # 先检索再生成、上下文组装、引用解析
   search.py            # /api/search、/api/ask、来源端点、草案别名、/search 页面
+  jwt_auth.py          # HS256 签发/验签/撤销；Bearer 优先于 Cookie；角色每次回库
+  agents.py            # 应用 CRUD + 技能/材料绑定 + 可见性
+  agent_skills.py      # 技能解析/拒收/内置播种/确定性路由
+  agent_chat.py        # 会话、五段 system、资料预算、工具循环、SSE
+  mcp_service.py       # 自建 MCP 服务（JSON-RPC：initialize / tools/list / tools/call）
+  mcp_client.py        # MCP 客户端（标准库 urllib，传输层可注入）
+  mcp_host.py          # 登记/发现/引用校验/候选集/审计
+  openapi.py           # /api/openapi.json + /api/docs
+  pages.py             # /agents /skills /mcp /chat 页面外壳
+  templates/{agents,skills,mcp,chat,api_docs,_nav}.html
   templates/search.html
   static/app.css
 scripts/
@@ -181,6 +242,9 @@ scripts/
   qdrant_stub.py       # Qdrant 最小 REST 子集测试替身（无 Docker 时用）
   validate_spec.py     # 规约自检（本地等价 openspec validate --strict）
   check_compose.py     # compose / Dockerfile 静态校验
+apitest/
+  run_all.py           # 一接口一脚本 → HTML 报告（支持 --dry-run）
+  api_01_health.py … api_16_openapi.py
 tests/
   test_acceptance.py           # 场景级：FR-01~05 / NFR-01~03
   http_acceptance.py           # 真实 HTTP + SQL 计数：A1–A12
@@ -188,12 +252,16 @@ tests/
   test_retrieval.py            # 检索（三模式/RRF/阈值/隔离）单元测试
   test_qa.py                   # 问答（上下文/system 丢弃/引用顺序）单元测试
   test_search_page.py          # 页面渲染纪律（转义/清空/三态/409/向量不落 DOM）
-  http_retrieval_acceptance.py # 本变更的真实 HTTP 验收（含课件清单逐条）
+  http_retrieval_acceptance.py # 变更二的真实 HTTP 验收（含课件清单逐条）
+  test_agent_platform.py       # 变更三的 32 个单元/契约测试类
+  http_agent_acceptance.py     # 变更三的 A1–A30 真实 HTTP 验收
   harness.py · stubs.py        # 夹具：临时库 + 替身网关/向量库
+  agent_harness.py             # 变更三夹具：种子模板库 + 可脚本化对话替身
 openspec/
   config.yaml
   changes/add-auth-rbac-class-knowledge/     # 变更一（已实现）
   changes/add-traceable-vector-retrieval/    # 变更二（已实现）
+  changes/add-agent-platform-mcp-tools/      # 变更三（已实现）
   specs/traceable-vector-retrieval/          # 归档位置（全部验收通过后才写入）
 Dockerfile · docker-compose.yml · entrypoint.sh · .env.example
 data/app.db            # 运行时生成
@@ -215,6 +283,18 @@ uploads/{class_id}/    # 运行时生成
 `index_status` 走状态机：`pending → indexing → indexed / failed`；`failed` 表示**向量未写入**
 （正文仍可被 `keyword` 命中，向量路不可用），不是「材料丢失」。
 
+变更三新增九张表：
+
+| 表 | 用途 |
+| --- | --- |
+| `tutor_agents` | 应用：班级、名称、提示词、启停 |
+| `agent_skills` | 技能：元数据、触发词、工具引用、正文、是否内置 |
+| `tutor_agent_skills` / `tutor_agent_materials` | 应用 ↔ 技能 / 材料绑定（均带 `class_id`） |
+| `conversations` / `messages` | 会话（锁定 `agent_id`）与消息（含 `citations_json` / `status` / `tool_calls_json`） |
+| `mcp_servers` | MCP 服务器登记：基址 + **令牌的变量名**（不存令牌本身） |
+| `mcp_tool_audit` | 工具调用审计：`ok` / `error` / `denied` 三态，**不记录请求头** |
+| `token_revocations` | `jti` 撤销名单（含过期时间，便于清理） |
+
 ## 验收
 
 ```bash
@@ -231,9 +311,17 @@ python tests/http_retrieval_acceptance.py --list          # 列出全部用例�
 python tests/http_retrieval_acceptance.py                 # 真实 HTTP 全套
 python tests/http_retrieval_acceptance.py --case ask-no-evidence-no-upstream   # 单条
 
+# 变更三（本变更）
+python -m unittest tests.test_agent_platform -v     # 32 个类 / 102 个用例
+python tests/http_agent_acceptance.py --list        # 列出 A1–A30
+python tests/http_agent_acceptance.py               # 真实 HTTP 全套
+python tests/http_agent_acceptance.py --only A21    # 单条
+python apitest/run_all.py --base-url http://127.0.0.1:5000   # 一接口一脚本 → HTML 报告
+
 # 规约与交付物
 python scripts/validate_spec.py                       # strict（全部变更）
 python scripts/validate_spec.py add-traceable-vector-retrieval --check-coverage
+python scripts/validate_spec.py add-agent-platform-mcp-tools --check-coverage
 python scripts/check_compose.py
 
 # 有 openspec CLI 的环境应另跑（本机无 CLI）

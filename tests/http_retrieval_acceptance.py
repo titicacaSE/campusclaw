@@ -852,7 +852,14 @@ def _run_backfill(db_path: Path, environ: dict, extra=None) -> dict:
     cmd = [sys.executable, str(ROOT / "scripts" / "backfill_index.py"),
            "--db", str(db_path), "--strategy", "custom", "--max-chars", "150",
            "--overlap-percent", "0"] + list(extra or [])
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=environ, encoding="utf-8")
+    # 子进程默认按本机区域编码写 stdout —— 中文 Windows 上是 GBK(936)，
+    # 而这里固定按 UTF-8 解析，两者的错配会让整套验收在解码处崩掉。
+    # 因此显式要求子进程也用 UTF-8，并让解码永不抛错（长度上限内不会丢内容）。
+    child_env = dict(environ or {})
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    child_env["PYTHONUTF8"] = "1"
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=child_env,
+                          encoding="utf-8", errors="replace")
     summary: dict = {}
     for line in (proc.stdout or "").splitlines():
         if line.startswith("[backfill] "):

@@ -213,10 +213,57 @@ def _hit_from_row(row, *, match_in_chunk: int = 0, hit_count: int = 0) -> Hit:
 # ---------------------------------------------------------------- 单路候选
 
 
-def keyword_candidates(class_id: int, q: str, *, limit: int = 10 ** 6):
-    """关键字路径候选（已按班级限定）。返回 `(hit_count, match_in_chunk, row)` 列表，名次 1 起。"""
-    window, total = db.search_chunks(class_id, q, limit=limit, offset=0)
+def keyword_candidates(class_id: int, q: str, *, limit: int = 10 ** 6,
+                       material_ids=None, terms=None):
+    """关键字路径候选（已按班级限定）。
+
+    - `terms` 为空：按整串字面匹配（`/api/search` 的原始语义，保持不变）；
+    - `terms` 非空：按「任一词命中」匹配，用于问答里的自然语言问句
+      （整句话作为子串几乎不可能命中，这是离线无嵌入时的兜底路径）。
+    """
+    if terms:
+        window, total = db.search_chunks_any_term(
+            class_id, terms, limit=limit, offset=0, material_ids=material_ids
+        )
+    else:
+        window, total = db.search_chunks(
+            class_id, q, limit=limit, offset=0, material_ids=material_ids
+        )
     return window, total
+
+
+# 问句切词用的停用词（只挡最高频的疑问/指代，避免把「作用」这类实词挡掉）
+_STOP_TERMS = frozenset(
+    {"什么", "怎么", "怎样", "如何", "为什", "么样", "可以", "是否", "这个", "那个",
+     "一下", "我们", "你们", "他们", "请问", "告诉", "帮我", "有什", "么作"}
+)
+_SEGMENT_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff]+")
+
+
+def extract_terms(question: str, max_terms: int = 12) -> list[str]:
+    """把问句切成检索词：中文取二元组，英文/数字取整词。保序去重。"""
+    terms: list[str] = []
+
+    def add(term: str) -> None:
+        if term and term not in terms:
+            terms.append(term)
+
+    for segment in _SEGMENT_RE.split((question or "").lower()):
+        if not segment:
+            continue
+        if re.search(r"[\u4e00-\u9fff]", segment):
+            if len(segment) <= 2:
+                add(segment)
+            else:
+                for idx in range(len(segment) - 1):
+                    bigram = segment[idx:idx + 2]
+                    if bigram not in _STOP_TERMS:
+                        add(bigram)
+        elif len(segment) >= 2:
+            add(segment)
+        if len(terms) >= max_terms:
+            break
+    return terms[:max_terms]
 
 
 def vector_candidates(
@@ -227,6 +274,7 @@ def vector_candidates(
     cfg: gateway.GatewayConfig,
     embed_transport=None,
     top_k: int = VECTOR_CANDIDATES,
+    material_ids=None,
 ):
     """向量路径候选：嵌入 → Qdrant（class_id pre-filter + 0.35 阈值）→ **回表再带 class_id**。"""
     vectors = gateway.embed([q], cfg=cfg, transport=embed_transport)
@@ -237,6 +285,7 @@ def vector_candidates(
         limit=top_k,
         score_threshold=VECTOR_MIN_SCORE,
     )
+    allowed = None if material_ids is None else {int(x) for x in material_ids}
     out = []
     for point in points:
         payload = point.get("payload") or {}
@@ -244,6 +293,8 @@ def vector_candidates(
         row = db.get_chunk(int(chunk_id), class_id)   # ② 回表双保险：必须再带 class_id
         if row is None:
             continue
+        if allowed is not None and int(row["material_id"]) not in allowed:
+            continue                                   # ③ 绑定材料收窄（智能体口径）
         score = float(point.get("score") or 0.0)
         if score < VECTOR_MIN_SCORE:                  # 双保险：阈值在本地再判一次
             continue
@@ -264,8 +315,14 @@ def retrieve(
     qdrant: QdrantClient | None = None,
     cfg: gateway.GatewayConfig | None = None,
     embed_transport=None,
+    material_ids=None,
+    keyword_terms=None,
 ) -> RetrievalResult:
-    """执行检索。输入已由 `validate_query` 校验过。"""
+    """执行检索。输入已由 `validate_query` 校验过。
+
+    `material_ids` 非 None 时把范围收窄到该智能体绑定的材料
+    （`add-agent-platform-mcp-tools` FR-3：只在本班、本智能体绑定材料内检索）。
+    """
     result = RetrievalResult(query=q, mode=mode)
 
     warnings = db.index_warnings(class_id)
@@ -277,7 +334,9 @@ def retrieve(
 
     kw_rank: dict[int, tuple[int, int, object]] = {}
     if mode in ("keyword", "hybrid"):
-        window, total = keyword_candidates(class_id, q)
+        window, total = keyword_candidates(
+            class_id, q, material_ids=material_ids, terms=keyword_terms
+        )
         result.total_matched = total
         for idx, (count, match_at, row) in enumerate(window, start=1):
             kw_rank[int(row["id"])] = (idx, count, row, match_at)
@@ -288,7 +347,8 @@ def retrieve(
             raise VectorStoreUnavailable("向量库客户端未提供")
         cfg = cfg or gateway.GatewayConfig.from_app()
         candidates, query_vector = vector_candidates(
-            class_id, q, qdrant=qdrant, cfg=cfg, embed_transport=embed_transport
+            class_id, q, qdrant=qdrant, cfg=cfg, embed_transport=embed_transport,
+            material_ids=material_ids,
         )
         result.query_vector = query_vector
         for idx, (score, row) in enumerate(candidates, start=1):

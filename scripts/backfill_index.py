@@ -27,6 +27,12 @@ import os
 import sys
 from pathlib import Path
 
+# 控制台编码兜底：本脚本输出单行 JSON，可能含中文（材料标题等）。
+# 中文 Windows 默认按 GBK 写 stdout，而消费方（验收脚本 / 流水线）通常按 UTF-8 解析，
+# 两者错配会直接抛 UnicodeDecodeError。统一固定为 UTF-8，让输出与解析一致。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import db, gateway, indexing, knowledge  # noqa: E402

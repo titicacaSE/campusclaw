@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>接口文档 · CampusClaw</title>
+<style>
+  :root { --line:#e3e6ea; --ink:#1f2328; --muted:#667085; --brand:#2f6f6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Microsoft YaHei",system-ui,sans-serif; color:var(--ink); background:#f6f7f9; }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:14px 22px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; position:sticky; top:0; z-index:5; }
+  header h1 { font-size:16px; margin:0; }
+  header .grow { flex:1; }
+  input, textarea, select { font:inherit; border:1px solid var(--line); border-radius:6px; padding:7px 9px; background:#fff; }
+  button { font:inherit; border:1px solid var(--brand); background:var(--brand); color:#fff; border-radius:6px; padding:7px 14px; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--brand); }
+  .wrap { display:grid; grid-template-columns:340px 1fr; gap:0; height:calc(100vh - 60px); }
+  .list { overflow:auto; background:#fff; border-right:1px solid var(--line); padding:10px; }
+  .group { font-size:12px; color:var(--muted); margin:12px 6px 6px; }
+  .op { display:flex; gap:8px; align-items:center; padding:7px 8px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .op:hover { background:#f1f4f6; }
+  .op.active { background:#eaf3f2; }
+  .method { font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px; color:#fff; min-width:46px; text-align:center; }
+  .get { background:#2b6cb0; } .post { background:#2f855a; } .patch { background:#b7791f; } .put { background:#6b46c1; }
+  .detail { overflow:auto; padding:22px; }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:10px; padding:18px; max-width:900px; }
+  .panel h2 { font-size:15px; margin:0 0 6px; }
+  .panel p { font-size:13px; color:var(--muted); margin:0 0 14px; line-height:1.6; }
+  .row { display:flex; gap:10px; align-items:flex-end; margin-bottom:10px; flex-wrap:wrap; }
+  .row label { font-size:12px; color:var(--muted); display:block; }
+  .row input { width:180px; }
+  textarea { width:100%; min-height:130px; font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+  pre { background:#0f172a; color:#e2e8f0; padding:14px; border-radius:8px; font-size:12px; overflow:auto; max-height:420px; white-space:pre-wrap; word-break:break-all; }
+  .hint { font-size:12px; color:var(--muted); }
+  .ok { color:#137333; } .bad { color:#b3261e; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CampusClaw · 接口文档</h1>
+  <span class="hint">Bearer 令牌</span>
+  <input id="token" type="password" placeholder="粘贴 op 之外的用户 JWT" style="width:320px">
+  <button class="ghost" id="save-token" type="button">保存到本页</button>
+  <button class="ghost" id="clear-token" type="button">清除</button>
+  <span class="grow"></span>
+  <span class="hint" id="status"></span>
+</header>
+
+<div class="wrap">
+  <aside class="list" id="list"></aside>
+  <section class="detail">
+    <div class="panel" id="panel">
+      <h2>使用说明</h2>
+      <p>1. 先调 <b>POST /api/auth/token</b> 用账号口令换 JWT；2. 把 token 粘到上方输入框；3. 左侧选择接口并发送。<br>
+         浏览器 Cookie 会话同样可用，但本页发送请求时优先带 Bearer。</p>
+      <p class="hint">本页不依赖任何 CDN，离线可用。</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  const list = document.getElementById('list');
+  const panel = document.getElementById('panel');
+  const statusBox = document.getElementById('status');
+  const tokenInput = document.getElementById('token');
+  let spec = null;
+
+  tokenInput.value = sessionStorage.getItem('campusclaw_docs_token') || '';
+  document.getElementById('save-token').onclick = function () {
+    sessionStorage.setItem('campusclaw_docs_token', tokenInput.value.trim());
+    statusBox.textContent = '令牌已保存在本标签页（sessionStorage）';
+  };
+  document.getElementById('clear-token').onclick = function () {
+    sessionStorage.removeItem('campusclaw_docs_token');
+    tokenInput.value = '';
+    statusBox.textContent = '已清除';
+  };
+
+  function el(tag, text, cls) {
+    const node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (cls) node.className = cls;
+    return node;
+  }
+
+  function exampleOf(op) {
+    const body = op.requestBody;
+    if (!body || !body.content) return null;
+    const json = body.content['application/json'];
+    return json && json.example ? JSON.stringify(json.example, null, 2) : null;
+  }
+
+  function render(op, method, path) {
+    panel.textContent = '';
+    panel.appendChild(el('h2', (op.summary || path)));
+    panel.appendChild(el('p', method.toUpperCase() + ' ' + path + '　' + (op.description || '')));
+
+    const params = [];
+    (op.parameters || []).forEach(function (p) {
+      if (p.in === 'path') params.push(p);
+    });
+    const pathInputs = {};
+    if (params.length) {
+      const row = el('div', null, 'row');
+      params.forEach(function (p) {
+        const label = el('label', p.name + '（path）');
+        const input = document.createElement('input');
+        input.type = 'text';
+        label.appendChild(input);
+        row.appendChild(label);
+        pathInputs[p.name] = input;
+      });
+      panel.appendChild(row);
+    }
+
+    const qs = (op.parameters || []).filter(function (p) { return p.in === 'query'; });
+    const queryInputs = {};
+    if (qs.length) {
+      const row = el('div', null, 'row');
+      qs.forEach(function (p) {
+        const label = el('label', p.name + '（query，可空）');
+        const input = document.createElement('input');
+        input.type = 'text';
+        label.appendChild(input);
+        row.appendChild(label);
+        queryInputs[p.name] = input;
+      });
+      panel.appendChild(row);
+    }
+
+    let bodyArea = null;
+    const example = exampleOf(op);
+    if (op.requestBody) {
+      panel.appendChild(el('div', '请求体（JSON）', 'hint'));
+      bodyArea = document.createElement('textarea');
+      bodyArea.value = example || '{}';
+      panel.appendChild(bodyArea);
+    }
+
+    const bar = el('div', null, 'row');
+    const sendBtn = el('button', '发送请求');
+    const result = el('pre', '等待发送…');
+    bar.appendChild(sendBtn);
+    panel.appendChild(bar);
+    panel.appendChild(result);
+
+    sendBtn.onclick = async function () {
+      let url = path;
+      Object.keys(pathInputs).forEach(function (name) {
+        url = url.replace('{' + name + '}', encodeURIComponent(pathInputs[name].value.trim()));
+      });
+      const query = [];
+      Object.keys(queryInputs).forEach(function (name) {
+        const value = queryInputs[name].value.trim();
+        if (value) query.push(encodeURIComponent(name) + '=' + encodeURIComponent(value));
+      });
+      if (query.length) url += '?' + query.join('&');
+
+      const headers = {};
+      const token = tokenInput.value.trim();
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const options = {method: method.toUpperCase(), headers: headers, credentials: 'same-origin'};
+      if (bodyArea) {
+        headers['Content-Type'] = 'application/json';
+        options.body = bodyArea.value;
+      }
+
+      result.textContent = '请求中…';
+      result.className = '';
+      try {
+        const res = await fetch(url, options);
+        const text = await res.text();
+        result.textContent = 'HTTP ' + res.status + ' ' + res.statusText + '\n\n' + text;
+        result.className = res.ok ? 'ok' : 'bad';
+        statusBox.textContent = method.toUpperCase() + ' ' + url + ' → ' + res.status;
+      } catch (err) {
+        result.textContent = '请求失败：' + err.message;
+        result.className = 'bad';
+      }
+    };
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/api/openapi.json');
+      spec = await res.json();
+    } catch (err) {
+      list.textContent = '无法读取 OpenAPI：' + err.message;
+      return;
+    }
+
+    const paths = spec.paths || {};
+    Object.keys(paths).sort().forEach(function (path) {
+      const group = el('div', path, 'group');
+      list.appendChild(group);
+      Object.keys(paths[path]).forEach(function (method) {
+        const op = paths[path][method];
+        const row = el('div', null, 'op');
+        row.appendChild(el('span', method.toUpperCase(), 'method ' + method));
+        row.appendChild(el('span', op.summary || path));
+        row.onclick = function () {
+          Array.from(list.querySelectorAll('.op')).forEach(function (n) { n.classList.remove('active'); });
+          row.classList.add('active');
+          render(op, method, path);
+        };
+        list.appendChild(row);
+      });
+    });
+    statusBox.textContent = Object.keys(paths).length + ' 个路径已加载';
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

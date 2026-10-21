@@ -30,6 +30,13 @@ UPSTREAM_CONFIG_KEYS = (
     "QDRANT_URL",
     "QDRANT_COLLECTION",
     "QDRANT_API_KEY",
+    # add-agent-platform-mcp-tools：JWT 与 MCP 令牌同样只走环境变量
+    "JWT_SECRET",
+    "JWT_TTL",
+    "MCP_SERVER_TOKEN",
+    "MCP_BASE_URL",
+    "MAX_TOOL_ROUNDS",
+    "AGENT_HISTORY_LIMIT",
 )
 
 
@@ -87,6 +94,10 @@ def create_app(**overrides) -> Flask:
         TESTING=bool(overrides.get("TESTING", False)),
     )
     app.config.update(_upstream_config(overrides))
+    # 测试注入点：传输层可替换（不落环境变量、不进镜像）
+    for key in ("CHAT_TRANSPORT", "EMBED_TRANSPORT", "MCP_TRANSPORT", "QDRANT_TRANSPORT"):
+        if key in overrides:
+            app.config[key] = overrides[key]
     app.json.ensure_ascii = False
 
     from . import db
@@ -101,11 +112,31 @@ def create_app(**overrides) -> Flask:
     from .materials import bp as materials_bp
     from .search import bp as search_bp
 
+    # Bearer JWT：Bearer 优先于 Cookie，Bearer 无效不回落（design.md §2.2）
+    from . import jwt_auth
+
+    jwt_auth.install(app)
+
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_auth_bp)
     app.register_blueprint(materials_bp)
     app.register_blueprint(search_bp)
+
+    # 智能体 / 技能 / 会话 / MCP / 文档
+    from .agents import bp as agents_bp
+    from .agent_skills import bp as agent_skills_bp
+    from .agent_chat import bp as agent_chat_bp
+    from .mcp_host import bp as mcp_host_bp
+    from .mcp_service import bp as mcp_service_bp
+    from .openapi import bp as openapi_bp
+    from .pages import bp as pages_bp
+
+    for module_bp in (
+        agents_bp, agent_skills_bp, agent_chat_bp, mcp_host_bp, mcp_service_bp,
+        openapi_bp, pages_bp,
+    ):
+        app.register_blueprint(module_bp)
 
     @app.errorhandler(413)
     def too_large(_err):

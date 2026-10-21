@@ -1,0 +1,37 @@
+# 本变更的 OpenSpec 局部配置
+# schema 与 openspec/config.yaml 保持一致；本文件只声明本变更的元信息，不覆盖项目级配置。
+
+project: CampusClaw
+change: add-auth-rbac-class-knowledge
+capability: auth-upload
+
+# 目录约定（与项目级 config.yaml 一致）
+changes_dir: openspec/changes
+specs_dir: openspec/specs
+
+# 变更状态：specified（规约完成，未实现）| implementing | verified | archived
+# 本变更为第 3 课交付物，已实现并通过验收；归档动作在后续变更一并处理。
+status: verified
+
+# 前置依赖（无）
+depends_on: []
+
+# 四件套产物路径（相对本变更目录）
+artifacts:
+  proposal: proposal.md
+  design: design.md
+  spec: specs/auth-upload/spec.md
+  tasks: tasks.md
+
+# 交付纪律
+rules:
+  # 需求变化先改本变更 Markdown，再改代码
+  spec_first: true
+  # 未全部验收通过前不得归档到 openspec/specs
+  archive_requires_all_passed: true
+  # 本变更已交付：允许任务处于已勾选状态
+  allow_prechecked_tasks: true
+  # 每条任务必须带可执行 verify
+  require_verify_per_task: true
+  # 每条勾选的任务必须留下可复核的证据（测试输出 / 命令回显）
+  require_evidence_per_checked_task: true

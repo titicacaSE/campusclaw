@@ -174,6 +174,34 @@ def seed_database(conn, upload_dir: Path, quiet: bool = False) -> bool:
         )
         knowledge_count += 1
 
+        # 切片（只做本地切分，不嵌入）：让关键词检索在首次启动就可用；
+        # 向量由 scripts/backfill_index.py 补，index_status 保持 pending。
+        from .chunking import ChunkConfig
+        from .retrieval import build_chunk_records
+
+        records, source_sha = build_chunk_records(
+            material_id, cid, body, ChunkConfig(strategy="auto")
+        )
+        for record in records:
+            conn.execute(
+                "INSERT INTO knowledge_chunks"
+                " (material_id, class_id, chunk_index, body_text, start_offset, end_offset,"
+                "  line_start, line_end, char_count, chunk_sha256, source_sha256,"
+                "  index_status, section, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+                (
+                    material_id, cid, record["chunk_index"], record["body_text"],
+                    record["start_offset"], record["end_offset"], record["line_start"],
+                    record["line_end"], len(record["body_text"]), record["chunk_sha256"],
+                    record["source_sha256"], record.get("section"), now,
+                ),
+            )
+        conn.execute(
+            "UPDATE materials SET source_sha256 = ?, chunk_strategy = 'auto',"
+            " index_status = 'pending' WHERE id = ?",
+            (source_sha, material_id),
+        )
+
         # 六类核心结构：讲义占位行（关联到刚入库的材料）
         conn.execute(
             """
@@ -211,6 +239,9 @@ def seed_database(conn, upload_dir: Path, quiet: bool = False) -> bool:
 
     conn.commit()
 
+    # 第 5 / 6 课：内置技能、两个应用、MCP 服务器登记
+    seed_agent_platform(conn, class_id, user_id, now)
+
     if not quiet:
         print(
             f"[seed] 完成：{len(CLASSES)} 个班级 / {len(USERS)} 个账号 / "
@@ -221,6 +252,108 @@ def seed_database(conn, upload_dir: Path, quiet: bool = False) -> bool:
     return True
 
 
+AGENT_PROMPTS = {
+    "数学解题助手": (
+        "你是初一数学解题助手。学生问的是具体题目时，先判断他卡在哪一步，"
+        "再给下一步该检查什么；不要直接给最终答案。"
+        "讲解必须引用资料中的方法名称，例如「符号法则」「运算顺序」。"
+        "回答控制在 120 字以内。"
+    ),
+    "语文阅读助手": (
+        "你是初一语文阅读助手。回答记叙文阅读题时，先判断题型"
+        "（要素梳理 / 线索顺序 / 人物形象 / 语言赏析），再给答题结构。"
+        "必须使用「特征 + 依据」的格式，依据要指向资料中的原句。"
+        "回答控制在 150 字以内。"
+    ),
+    "英语学习助手": (
+        "你是初一英语学习助手。优先纠正拼写与第三人称单数，再解释句型。"
+        "每个纠正都给出一个可替换的例句。回答控制在 120 字以内。"
+    ),
+}
+
+
+def seed_agent_platform(conn, class_id: dict, user_id: dict, now: str) -> None:
+    """播种内置技能、两个应用与一个 MCP 服务器登记（幂等：已存在则跳过）。"""
+    from .agent_skills import BUILTIN_SKILLS
+
+    for class_name, cid in class_id.items():
+        for spec in BUILTIN_SKILLS:
+            conn.execute(
+                "INSERT OR IGNORE INTO agent_skills"
+                " (class_id, name, triggers, material_filter, tools, body, source_text,"
+                "  is_builtin, enabled, created_by, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, '', 1, 1, ?, ?, ?)",
+                (
+                    cid, spec["name"], spec["triggers"], spec["material_filter"],
+                    spec["tools"], spec["body"], user_id["teacher_a"
+                                                          if class_name == "班级 A" else "teacher_b"],
+                    now, now,
+                ),
+            )
+
+        # 每班两个应用，绑不同的技能与材料（A1 的前提）
+        materials = conn.execute(
+            "SELECT id, subject FROM materials WHERE class_id = ? ORDER BY id", (cid,)
+        ).fetchall()
+        by_subject = {row["subject"]: int(row["id"]) for row in materials}
+        skills = {
+            row["name"]: int(row["id"])
+            for row in conn.execute(
+                "SELECT id, name FROM agent_skills WHERE class_id = ?", (cid,)
+            )
+        }
+        teacher = user_id["teacher_a" if class_name == "班级 A" else "teacher_b"]
+
+        if class_name == "班级 A":
+            plan = (
+                ("数学解题助手", "数学", "解题引导"),
+                ("语文阅读助手", "语文", "作业批改"),
+            )
+        else:
+            plan = (
+                ("数学解题助手", "数学", "解题引导"),
+                ("英语学习助手", "英语", "错题讲解"),
+            )
+
+        for name, subject, skill_name in plan:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO tutor_agents"
+                " (class_id, name, prompt, enabled, created_by, created_at, updated_at)"
+                " VALUES (?, ?, ?, 1, ?, ?, ?)",
+                (cid, name, AGENT_PROMPTS[name], teacher, now, now),
+            )
+            agent_id = cur.lastrowid
+            if not agent_id:
+                continue
+            material_id = by_subject.get(subject)
+            if material_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO tutor_agent_materials"
+                    " (agent_id, material_id, class_id) VALUES (?, ?, ?)",
+                    (agent_id, material_id, cid),
+                )
+            skill_id = skills.get(skill_name)
+            if skill_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO tutor_agent_skills"
+                    " (agent_id, skill_id, class_id) VALUES (?, ?, ?)",
+                    (agent_id, skill_id, cid),
+                )
+
+    # MCP 服务器登记：只存环境变量名，令牌来自服务端环境
+    import os
+
+    base_url = (os.environ.get("MCP_BASE_URL") or "http://127.0.0.1:5000").rstrip("/")
+    for cid in class_id.values():
+        conn.execute(
+            "INSERT OR IGNORE INTO mcp_servers"
+            " (class_id, name, base_url, token_env, enabled, created_at, updated_at)"
+            " VALUES (?, 'campusclaw', ?, 'MCP_SERVER_TOKEN', 1, ?, ?)",
+            (cid, base_url, now, now),
+        )
+    conn.commit()
+
+
 def reseed(db_path, upload_dir: Path, quiet: bool = False) -> bool:
     """清空业务表并重新写入种子数据（脚本 --force 使用）。
 
@@ -229,6 +362,9 @@ def reseed(db_path, upload_dir: Path, quiet: bool = False) -> bool:
       knowledge_chunks.material_id  → materials（派生数据，必须先于 materials 删除）
       knowledge_entries.material_id → materials
       handouts.material_id         → materials
+      tutor_agent_materials.material_id → materials
+      messages → conversations → tutor_agents
+      tutor_agent_skills → agent_skills / tutor_agents
       skills.assistant_id          → assistants
       materials.uploaded_by / assignments.created_by / assistants.owner_id → users
       users.class_id               → classes
@@ -236,15 +372,24 @@ def reseed(db_path, upload_dir: Path, quiet: bool = False) -> bool:
     conn = connect(db_path)
     try:
         for table in (
-            "knowledge_chunks",   # 派生索引，依赖 materials / classes，最先删
-            "knowledge_entries",  # 依赖 materials / classes，先删
-            "skills",             # 依赖 assistants
-            "handouts",           # 依赖 materials / classes
-            "assignments",        # 依赖 classes / users
-            "materials",          # 此时 knowledge_chunks 与 knowledge_entries / handouts 已清空
-            "assistants",         # 此时 skills 已清空
-            "users",              # 此时 materials / assignments / assistants 已清空
-            "classes",            # 最后删（被上述所有表引用）
+            "knowledge_chunks",        # 派生索引，依赖 materials / classes，最先删
+            "knowledge_entries",       # 依赖 materials / classes，先删
+            "mcp_tool_audit",          # 依赖 classes / users（弱引用）
+            "messages",                # 依赖 conversations
+            "conversations",           # 依赖 tutor_agents / users
+            "tutor_agent_materials",   # 依赖 materials / tutor_agents
+            "tutor_agent_skills",      # 依赖 agent_skills / tutor_agents
+            "tutor_agents",            # 此时绑定已清空
+            "agent_skills",            # 此时绑定已清空
+            "mcp_servers",
+            "token_revocations",
+            "skills",                  # 依赖 assistants
+            "handouts",                # 依赖 materials / classes
+            "assignments",             # 依赖 classes / users
+            "materials",               # 此时 knowledge_chunks 与 knowledge_entries / handouts 已清空
+            "assistants",              # 此时 skills 已清空
+            "users",                   # 此时 materials / assignments / assistants 已清空
+            "classes",                 # 最后删（被上述所有表引用）
         ):
             conn.execute(f"DELETE FROM {table}")
         conn.execute("DELETE FROM sqlite_sequence")

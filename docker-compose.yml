@@ -18,6 +18,8 @@ services:
       # 把下面这行注释掉即可（environment 优先级高于 env_file）
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: campusclaw_chunks
+      # MCP 宿主访问自身 MCP 服务：走容器名与内部端口（不是 0.0.0.0 对外的 8080）
+      MCP_BASE_URL: http://app:8080
     volumes:
       # down/up 后预置账号与已上传材料仍可查询（NFR-02 S3 / A11）
       - ./data:/app/data

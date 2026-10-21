@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} · CampusClaw</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<main class="page">
+  <div class="page-head">
+    <h1>{{ klass }} · AI 应用</h1>
+    <p>一个应用 = 一份角色提示词 + 一组技能绑定 + 一组材料绑定。会话创建时锁定应用，之后不随请求体改变。</p>
+  </div>
+
+  <div id="notice" class="notice" hidden></div>
+
+  {% if role == 'teacher' %}
+  <section class="card" style="margin-bottom:20px">
+    <h2 style="font-size:16px;margin-bottom:12px">新建应用</h2>
+    <div style="display:grid;gap:10px;max-width:720px">
+      <label>名称（≤64 字，班内唯一）
+        <input id="new-name" type="text" maxlength="64" style="width:100%;padding:8px">
+      </label>
+      <label>角色提示词（≤2000 字，可留空回退默认角色）
+        <textarea id="new-prompt" rows="4" maxlength="2000" style="width:100%;padding:8px"></textarea>
+      </label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <label>技能绑定
+          <select id="new-skills" multiple size="4" style="min-width:220px"></select>
+        </label>
+        <label>材料绑定
+          <select id="new-materials" multiple size="4" style="min-width:280px"></select>
+        </label>
+      </div>
+      <div><button class="btn" id="create-btn" type="button">创建</button></div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section>
+    <h2 style="font-size:16px;margin-bottom:10px">应用列表</h2>
+    <div id="agents" style="display:grid;gap:12px"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const notice = document.getElementById('notice');
+  const agentsBox = document.getElementById('agents');
+  const isTeacher = {{ 'true' if role == 'teacher' else 'false' }};
+
+  function show(text, bad) {
+    notice.hidden = false;
+    notice.textContent = text;
+    notice.style.background = bad ? '#fdecec' : '';
+  }
+
+  function el(tag, text, style) {
+    const node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (style) node.setAttribute('style', style);
+    return node;
+  }
+
+  async function api(path, options) {
+    const res = await fetch(path, Object.assign({credentials: 'same-origin'}, options || {}));
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) {
+      const message = (data && (data.message || data.error)) || ('HTTP ' + res.status);
+      throw new Error(message);
+    }
+    return data;
+  }
+
+  async function loadOptions() {
+    const skills = await api('/api/skills');
+    const materials = await api('/api/materials?page_size=100');
+    const skillSel = document.getElementById('new-skills');
+    const matSel = document.getElementById('new-materials');
+    if (!skillSel || !matSel) return;
+    skills.skills.forEach(function (s) {
+      const opt = el('option', s.name + (s.enabled ? '' : '（已停用）'));
+      opt.value = String(s.id);
+      skillSel.appendChild(opt);
+    });
+    materials.materials.forEach(function (m) {
+      const opt = el('option', m.title);
+      opt.value = String(m.id);
+      matSel.appendChild(opt);
+    });
+  }
+
+  function selected(select) {
+    return Array.from(select.selectedOptions).map(function (o) { return Number(o.value); });
+  }
+
+  function renderAgent(agent) {
+    const card = el('div', null, 'border:1px solid #e3e6ea;border-radius:10px;padding:14px;background:#fff');
+    const head = el('div', null, 'display:flex;align-items:center;gap:10px;flex-wrap:wrap');
+    head.appendChild(el('b', agent.name, 'font-size:15px'));
+    head.appendChild(el('span', agent.enabled ? '已启用' : '已停用', 'font-size:12px;color:#666'));
+    head.appendChild(el('span', '技能 ' + agent.skills.length + ' · 材料 ' + agent.materials.length,
+      'font-size:12px;color:#666'));
+    card.appendChild(head);
+
+    const prompt = el('p', agent.prompt ? agent.prompt : '（空提示词 → 回退默认角色）',
+      'color:#555;font-size:13px;margin:8px 0');
+    card.appendChild(prompt);
+
+    const skills = el('div', '技能：' + (agent.skills.map(function (s) { return s.name; }).join('、') || '未绑定'),
+      'font-size:12px;color:#666');
+    card.appendChild(skills);
+    const mats = el('div', '材料：' + (agent.materials.map(function (m) { return m.title; }).join('、') || '未绑定'),
+      'font-size:12px;color:#666');
+    card.appendChild(mats);
+
+    if (isTeacher) {
+      const bar = el('div', null, 'margin-top:10px;display:flex;gap:8px;flex-wrap:wrap');
+      const toggle = el('button', agent.enabled ? '停用' : '启用', 'padding:5px 10px');
+      toggle.className = 'btn';
+      toggle.onclick = async function () {
+        await api('/api/agents/' + agent.id, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({enabled: !agent.enabled})
+        });
+        await load();
+      };
+      bar.appendChild(toggle);
+      const open = el('a', '用它对话', 'padding:5px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px');
+      open.href = '/chat?agent_id=' + agent.id;
+      bar.appendChild(open);
+      card.appendChild(bar);
+    }
+    return card;
+  }
+
+  async function load() {
+    try {
+      const data = await api('/api/agents');
+      agentsBox.textContent = '';
+      if (!data.agents.length) {
+        agentsBox.appendChild(el('div', '还没有可用应用。', 'color:#666'));
+        return;
+      }
+      data.agents.forEach(function (a) { agentsBox.appendChild(renderAgent(a)); });
+    } catch (err) {
+      show(err.message, true);
+    }
+  }
+
+  const createBtn = document.getElementById('create-btn');
+  if (createBtn) {
+    createBtn.onclick = async function () {
+      const name = document.getElementById('new-name').value.trim();
+      if (!name) { show('请填写名称', true); return; }
+      try {
+        await api('/api/agents', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            name: name,
+            prompt: document.getElementById('new-prompt').value,
+            skill_ids: selected(document.getElementById('new-skills')),
+            material_ids: selected(document.getElementById('new-materials'))
+          })
+        });
+        show('已创建：' + name, false);
+        document.getElementById('new-name').value = '';
+        document.getElementById('new-prompt').value = '';
+        await load();
+      } catch (err) {
+        show(err.message, true);
+      }
+    };
+    loadOptions().catch(function (err) { show(err.message, true); });
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

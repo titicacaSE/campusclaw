@@ -1,5 +1,8 @@
 # 第四课作业说明：可溯源向量检索与基于本班资料的问答
 
+> 第五、六课（AI 应用平台：智能体 / 技能 / MCP 工具）的作业说明见
+> [`HOMEWORK-AGENT-PLATFORM.md`](HOMEWORK-AGENT-PLATFORM.md)；两者是同一仓库的连续变更。
+
 > 仓库：CampusClaw（学期工程，Flask 3.x + SQLite 3 + Qdrant）
 > 本次变更：`add-traceable-vector-retrieval`　新增能力：`traceable-vector-retrieval`
 > 变更目录：`openspec/changes/add-traceable-vector-retrieval/`

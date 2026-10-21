@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} · CampusClaw</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<main class="page">
+  <div class="page-head">
+    <h1>{{ klass }} · 技能</h1>
+    <p>技能文件：空行以上是元数据（名称 / 适用条件 / 资料 / 工具 / 启用），空行以下是说明正文。
+       命中时<strong>整段说明</strong>进入 system；适用条件只用于服务端路由计分，不进提示词。</p>
+  </div>
+
+  <div id="notice" class="notice" hidden></div>
+
+  {% if role == 'teacher' %}
+  <section class="card" style="margin-bottom:20px">
+    <h2 style="font-size:16px;margin-bottom:10px">上传技能</h2>
+    <textarea id="skill-text" rows="10" style="width:100%;padding:10px;font-family:ui-monospace,Consolas,monospace"
+      placeholder="名称: 因式分解引导&#10;适用条件: 因式分解,提公因式,公式法&#10;资料: 数学&#10;工具: knowledge_search&#10;启用: 是&#10;&#10;先判断能否提公因式，再考虑公式法。"></textarea>
+    <div style="margin-top:10px;display:flex;gap:12px;align-items:center">
+      <button class="btn" id="upload-btn" type="button">上传</button>
+      <label style="font-size:13px">或选择文件 <input id="skill-file" type="file" accept=".txt,.md"></label>
+    </div>
+  </section>
+  {% endif %}
+
+  <section>
+    <h2 style="font-size:16px;margin-bottom:10px">技能列表</h2>
+    <div id="skills" style="display:grid;gap:12px"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const notice = document.getElementById('notice');
+  const box = document.getElementById('skills');
+  const isTeacher = {{ 'true' if role == 'teacher' else 'false' }};
+
+  function show(text, bad) {
+    notice.hidden = false;
+    notice.textContent = text;
+    notice.style.background = bad ? '#fdecec' : '';
+  }
+
+  function el(tag, text, style) {
+    const node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (style) node.setAttribute('style', style);
+    return node;
+  }
+
+  async function api(path, options) {
+    const res = await fetch(path, Object.assign({credentials: 'same-origin'}, options || {}));
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) throw new Error((data && (data.message || data.error)) || ('HTTP ' + res.status));
+    return data;
+  }
+
+  function render(skill) {
+    const card = el('div', null, 'border:1px solid #e3e6ea;border-radius:10px;padding:14px;background:#fff');
+    const head = el('div', null, 'display:flex;gap:10px;align-items:center;flex-wrap:wrap');
+    head.appendChild(el('b', skill.name, 'font-size:15px'));
+    if (skill.is_builtin) head.appendChild(el('span', '内置', 'font-size:11px;background:#eef2ff;color:#3b4fd8;padding:2px 6px;border-radius:4px'));
+    head.appendChild(el('span', skill.enabled ? '已启用' : '已停用', 'font-size:12px;color:#666'));
+    card.appendChild(head);
+
+    card.appendChild(el('div', '适用条件：' + skill.triggers_list.join('、'), 'font-size:12px;color:#666;margin-top:6px'));
+    card.appendChild(el('div', '资料过滤：' + (skill.material_filter || '（不过滤）') + ' · 工具：' + skill.tools.join('、'),
+      'font-size:12px;color:#666'));
+    card.appendChild(el('p', skill.body, 'font-size:13px;color:#333;margin:8px 0;white-space:pre-wrap'));
+
+    if (isTeacher) {
+      const btn = el('button', skill.enabled ? '停用' : '启用', 'padding:5px 10px');
+      btn.className = 'btn';
+      btn.onclick = async function () {
+        try {
+          await api('/api/skills/' + skill.id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: !skill.enabled})
+          });
+          await load();
+        } catch (err) { show(err.message, true); }
+      };
+      card.appendChild(btn);
+    }
+    return card;
+  }
+
+  async function load() {
+    try {
+      const data = await api('/api/skills');
+      box.textContent = '';
+      data.skills.forEach(function (s) { box.appendChild(render(s)); });
+    } catch (err) { show(err.message, true); }
+  }
+
+  const uploadBtn = document.getElementById('upload-btn');
+  if (uploadBtn) {
+    uploadBtn.onclick = async function () {
+      const text = document.getElementById('skill-text').value;
+      const fileInput = document.getElementById('skill-file');
+      if (!text.trim() && !fileInput.files.length) { show('请粘贴内容或选择文件', true); return; }
+      try {
+        let res;
+        if (fileInput.files.length) {
+          const form = new FormData();
+          form.append('file', fileInput.files[0]);
+          res = await fetch('/api/skills', {method: 'POST', body: form, credentials: 'same-origin'});
+        } else {
+          res = await fetch('/api/skills', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: text}),
+            credentials: 'same-origin'
+          });
+        }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error);
+        show('已上传：' + data.name, false);
+        document.getElementById('skill-text').value = '';
+        fileInput.value = '';
+        await load();
+      } catch (err) { show(err.message, true); }
+    };
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

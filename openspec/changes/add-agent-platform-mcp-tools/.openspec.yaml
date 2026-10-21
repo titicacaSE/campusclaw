@@ -1,0 +1,60 @@
+# 本变更的 OpenSpec 局部配置
+
+project: CampusClaw
+change: add-agent-platform-mcp-tools
+capability: agent-platform
+
+changes_dir: openspec/changes
+specs_dir: openspec/specs
+
+# 规约 + 实现同轮交付；全部验收通过后改 verified
+status: implementing
+
+depends_on:
+  - add-auth-rbac-class-knowledge
+  - add-traceable-vector-retrieval
+
+# 本变更用 MODIFIED 段落取代上游的认证条款（Bearer JWT）
+modifies:
+  - add-traceable-vector-retrieval
+
+artifacts:
+  proposal: proposal.md
+  design: design.md
+  spec: specs/agent-platform/spec.md
+  tasks: tasks.md
+
+rules:
+  spec_first: true
+  archive_requires_all_passed: true
+  allow_prechecked_tasks: true
+  require_verify_per_task: true
+  require_evidence_per_checked_task: true
+
+# 本变更的覆盖关切项（覆盖全局表；检索类能力已由上一变更交付，不在本变更重复要求）
+coverage_concerns:
+  - ["Bearer JWT 鉴权", ["jwt", "bearer"]]
+  - ["算法白名单（none 拒绝）", ["alg", "none"]]
+  - ["令牌撤销", ["revoke", "撤销"]]
+  - ["角色与班级回库读", ["回库", "role"]]
+  - ["智能体班内唯一", ["重名", "唯一"]]
+  - ["会话锁定应用", ["锁定", "agent_id"]]
+  - ["提示词 2000 字上限", ["2000"]]
+  - ["资料 4 条 / 800 字", ["800", "limit=4"]]
+  - ["未命中不调模型", ["no_evidence", "不调模型"]]
+  - ["技能解析与拒收", ["拒收", "解析"]]
+  - ["确定性路由", ["路由", "计分"]]
+  - ["同分取小编号", ["同分"]]
+  - ["解题引导不给答案", ["解题引导"]]
+  - ["MCP 三方法", ["tools/list", "tools/call"]]
+  - ["工具引用格式", ["tool@server", "引用"]]
+  - ["调用轮次上限", ["轮次", "上限"]]
+  - ["denied 可见", ["denied"]]
+  - ["审计三态", ["审计"]]
+  - ["SSE 增量", ["delta", "增量"]]
+  - ["OpenAPI 文档页", ["openapi", "docs"]]
+  - ["apitest 报告", ["apitest", "run_all"]]
+  - ["密钥只在服务端", ["密钥", "secret"]]
+  - ["跨班同形 404", ["404"]]
+  - ["既有行为回归", ["回归"]]
+  - ["真实证据", ["verify"]]

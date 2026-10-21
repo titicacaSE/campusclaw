@@ -200,3 +200,62 @@ def chat(messages: list[dict], *, cfg: GatewayConfig, transport=None, temperatur
     if not isinstance(content, str):
         raise ChatUnavailable("对话网关未返回文本内容")
     return content
+
+
+# --------------------------------------------------------------------- 带工具对话
+
+# 第 5 课 V1 表：temperature 0.2、max_tokens 500、超时 50s 固定
+AGENT_TEMPERATURE = 0.2
+AGENT_MAX_TOKENS = 500
+AGENT_CHAT_TIMEOUT = 50
+
+
+def chat_tools(
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    *,
+    cfg: GatewayConfig,
+    transport=None,
+    temperature: float = AGENT_TEMPERATURE,
+    max_tokens: int = AGENT_MAX_TOKENS,
+    timeout: int = AGENT_CHAT_TIMEOUT,
+) -> dict:
+    """返回 `{"content": str, "tool_calls": [...]}`。
+
+    模型只**提议**工具调用，不执行；执行由宿主按同一 `inputSchema` 校验后再发
+    `tools/call`（design.md §7.2）。
+    """
+    if not cfg.chat_ready:
+        raise ChatUnavailable("对话网关未配置（缺少 CHAT_MODEL 等环境变量）")
+
+    send = transport or http_json
+    url = f"{cfg.chat_base_url}/chat/completions"
+    payload: dict = {
+        "model": cfg.chat_model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if tools:
+        payload["tools"] = tools
+
+    try:
+        resp = send(url, _auth_headers(cfg.chat_api_key), payload, timeout)
+    except GatewayError as exc:
+        raise ChatUnavailable(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise ChatUnavailable(f"对话调用失败：{type(exc).__name__}") from exc
+
+    choices = (resp or {}).get("choices") or []
+    if not choices:
+        raise ChatUnavailable("对话网关未返回 choices")
+    message = choices[0].get("message") or {}
+    content = message.get("content")
+    if content is None:
+        content = ""
+    if not isinstance(content, str):
+        raise ChatUnavailable("对话网关返回的 content 不是文本")
+    tool_calls = message.get("tool_calls") or []
+    if not content and not tool_calls:
+        raise ChatUnavailable("对话网关返回空正文")
+    return {"content": content, "tool_calls": tool_calls}

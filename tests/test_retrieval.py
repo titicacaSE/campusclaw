@@ -674,8 +674,14 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(self.h.search_chunks(1, "a.c")[1], 0)
 
     def test_chinese_literal_substring_matches(self):
-        insert_material(self.h, "倒叙的作用是设置悬念，插叙用于补充背景。")
-        self.assertEqual(self.h.search_chunks(1, "倒叙的作用")[1], 1)
+        # 特意选一个种子语料里没有的词：种子现在会预生成切片（开局即可关键词检索），
+        # 若沿用「倒叙的作用」这类种子词，命中数会被种子材料影响而不再唯一。
+        material_id, _chunk_ids = insert_material(
+            self.h, "闰土的银项圈在月光下泛着冷光，那是我记忆里最清晰的一笔。"
+        )
+        window, total = self.h.search_chunks(1, "银项圈")
+        self.assertEqual(total, 1)
+        self.assertEqual(int(window[0][2]["material_id"]), material_id)
 
 
 class HitFieldsTests(unittest.TestCase):

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>接口测试报告 · CampusClaw AI 应用平台</title>
+<style>
+ body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;margin:32px;color:#1f2933;background:#fbfcfd}
+ h1{font-size:20px;margin:0 0 6px}
+ .meta{color:#52606d;font-size:13px;margin-bottom:18px}
+ .cards{display:flex;gap:14px;margin:18px 0 22px}
+ .card{border:1px solid #e2e8f0;border-radius:10px;padding:12px 18px;background:#fff;min-width:130px}
+ .card b{display:block;font-size:22px;margin-top:4px}
+ .ok b{color:#0f766e} .bad b{color:#b91c1c}
+ table{border-collapse:collapse;width:100%;background:#fff;font-size:13px}
+ th,td{border:1px solid #e2e8f0;padding:7px 9px;text-align:left;vertical-align:top}
+ th{background:#f1f5f9;font-weight:600}
+ tr.fail td{background:#fef2f2}
+ td.detail{max-width:420px;word-break:break-all;font-family:Consolas,monospace;font-size:12px}
+ td.note{max-width:220px;color:#52606d}
+ code{background:#f1f5f9;padding:1px 5px;border-radius:4px}
+ .foot{margin-top:16px;color:#7b8794;font-size:12px}
+</style></head><body>
+<h1>CampusClaw AI 应用平台 · 接口测试报告</h1>
+<div class="meta">
+ 目标实例 <code>http://127.0.0.1:5055</code> ·
+ 开始 2026-10-21 11:54:37 · 耗时 0.9s ·
+ 脚本 16 个
+</div>
+<div class="cards">
+  <div class="card ok">通过<b>16</b></div>
+  <div class="card bad">失败<b>0</b></div>
+  <div class="card">通过率<b>100%</b></div>
+</div>
+<table>
+<thead><tr>
+ <th>#</th><th>接口</th><th>方法</th><th>路径</th><th>期望</th>
+ <th>结果</th><th>耗时</th><th>响应摘要</th><th>说明</th>
+</tr></thead>
+<tbody><tr class='pass'><td>1</td><td>健康检查</td><td><code>GET</code></td><td><code>/health</code></td><td>200</td><td>通过</td><td>2 ms</td><td class='detail'>{&quot;database&quot;:&quot;ok&quot;,&quot;service&quot;:&quot;campusclaw&quot;,&quot;status&quot;:&quot;ok&quot;} </td><td class='note'>免登录、不重定向，返回服务与数据库状态</td></tr><tr class='pass'><td>2</td><td>签发令牌</td><td><code>POST</code></td><td><code>/api/auth/token</code></td><td>200</td><td>通过</td><td>263 ms</td><td class='detail'>expires_in=3600 token=eyJhbGciOiJIUzI1NiIsInR5…</td><td class='note'>口令正确返回 Bearer JWT；错误口令与未知用户同形 401</td></tr><tr class='pass'><td>3</td><td>当前身份</td><td><code>GET</code></td><td><code>/api/auth/me</code></td><td>200</td><td>通过</td><td>3 ms</td><td class='detail'>role=teacher class_id=1</td><td class='note'>Bearer 有效即回身份；角色与班级每次回库读</td></tr><tr class='pass'><td>4</td><td>撤销令牌</td><td><code>POST</code></td><td><code>/api/auth/revoke</code></td><td>200</td><td>通过</td><td>283 ms</td><td class='detail'>撤销前 200 / 撤销 200 / 撤销后 401</td><td class='note'>撤销后同一枚令牌立即 401；用一次性令牌执行，避免影响其它用例</td></tr><tr class='pass'><td>5</td><td>应用列表</td><td><code>GET</code></td><td><code>/api/agents</code></td><td>200</td><td>通过</td><td>25 ms</td><td class='detail'>total=3 names=[&#x27;数学解题助手&#x27;, &#x27;语文阅读助手&#x27;, &#x27;apitest 临时应用 1792554855&#x27;]</td><td class='note'>教师见本班全部；学生只见 enabled=1</td></tr><tr class='pass'><td>6</td><td>新建应用</td><td><code>POST</code></td><td><code>/api/agents</code></td><td>201</td><td>通过</td><td>32 ms</td><td class='detail'>id=6 name=apitest 临时应用 1792554877 skills=0</td><td class='note'>name ≤64 且班内唯一；学生调用为 403</td></tr><tr class='pass'><td>7</td><td>应用详情</td><td><code>GET</code></td><td><code>&lt;运行时决定&gt;</code></td><td>200</td><td>通过</td><td>20 ms</td><td class='detail'>id=1 name=数学解题助手 enabled=True</td><td class='note'>按编号直取；他班编号与不存在返回同形 404</td></tr><tr class='pass'><td>8</td><td>技能列表</td><td><code>GET</code></td><td><code>/api/skills</code></td><td>200</td><td>通过</td><td>23 ms</td><td class='detail'>total=4 builtin=[&#x27;解题引导&#x27;, &#x27;作业批改&#x27;, &#x27;错题讲解&#x27;]</td><td class='note'>每班三项内置技能（解题引导 / 作业批改 / 错题讲解），可被教师停用</td></tr><tr class='pass'><td>9</td><td>上传技能</td><td><code>POST</code></td><td><code>/api/skills</code></td><td>201</td><td>通过</td><td>15 ms</td><td class='detail'>id=26 triggers=[&#x27;接口测试&#x27;, &#x27;自动化&#x27;]</td><td class='note'>六类不合规（空文件/缺正文/坏行/未知字段/重复字段/缺必填）返回 400</td></tr><tr class='pass'><td>10</td><td>新建会话</td><td><code>POST</code></td><td><code>&lt;运行时决定&gt;</code></td><td>201</td><td>通过</td><td>16 ms</td><td class='detail'>id=2 agent=数学解题助手</td><td class='note'>会话一旦建立即锁定 agent_id；后续请求体换 agent_id 无效</td></tr><tr class='pass'><td>11</td><td>提问（非流式）</td><td><code>POST</code></td><td><code>&lt;运行时决定&gt;</code></td><td>200,503</td><td>通过</td><td>15 ms</td><td class='detail'>no_evidence（固定文案 + 空 citations）</td><td class='note'>无命中不调对话网关；[n] 与 citations 下标一一对应</td></tr><tr class='pass'><td>12</td><td>提问（SSE 流式）</td><td><code>POST</code></td><td><code>&lt;运行时决定&gt;</code></td><td>200,503</td><td>通过</td><td>29 ms</td><td class='detail'>events=3 deltas=1 末事件=done</td><td class='note'>首事件前失败为 4xx/5xx；delta.text 是新增片段而非累计全文</td></tr><tr class='pass'><td>13</td><td>MCP 服务器列表</td><td><code>GET</code></td><td><code>/api/mcp/servers</code></td><td>200</td><td>通过</td><td>11 ms</td><td class='detail'>total=1 token_configured=True</td><td class='note'>令牌只在服务端环境变量；接口只回 token_configured 布尔值</td></tr><tr class='pass'><td>14</td><td>MCP 可用工具</td><td><code>GET</code></td><td><code>/api/mcp/tools</code></td><td>200</td><td>通过</td><td>39 ms</td><td class='detail'>total=2 refs=[&#x27;calculator@campusclaw&#x27;, &#x27;text_stats@campusclaw&#x27;]</td><td class='note'>工具名来自服务器 tools/list，引用形如 calculator@campusclaw</td></tr><tr class='pass'><td>15</td><td>MCP JSON-RPC</td><td><code>POST</code></td><td><code>/mcp</code></td><td>200,401</td><td>通过</td><td>59 ms</td><td class='detail'>initialize=200 匿名=401 tools=[&#x27;calculator&#x27;, &#x27;text_stats&#x27;] calculator=12*(3+4) = 84</td><td class='note'>独立令牌（MCP_SERVER_TOKEN），不是用户 JWT；未配置时 401 属预期</td></tr><tr class='pass'><td>16</td><td>OpenAPI 描述</td><td><code>GET</code></td><td><code>/api/openapi.json</code></td><td>200</td><td>通过</td><td>16 ms</td><td class='detail'>openapi=3.0.3 paths=21 version=1.0.0</td><td class='note'>公开可读；/api/docs 读同一份描述渲染可试调页面</td></tr></tbody>
+</table>
+<div class="foot">
+ 由 <code>apitest/run_all.py</code> 生成 · 一接口一脚本，脚本只声明 SPEC，运行器统一执行与记录。
+</div>
+</body></html>

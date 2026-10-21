@@ -125,11 +125,119 @@ CREATE TABLE IF NOT EXISTS skills (
   created_at   TEXT    NOT NULL
 );
 
+-- ===== add-agent-platform-mcp-tools 新增结构 =====
+
+-- 智能体（应用）：一份角色提示词 + 技能绑定 + 材料绑定
+CREATE TABLE IF NOT EXISTS tutor_agents (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id    INTEGER NOT NULL REFERENCES classes(id),
+  name        TEXT    NOT NULL,
+  prompt      TEXT    NOT NULL DEFAULT '',
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT    NOT NULL,
+  updated_at  TEXT    NOT NULL,
+  UNIQUE (class_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS tutor_agent_skills (
+  agent_id  INTEGER NOT NULL REFERENCES tutor_agents(id) ON DELETE CASCADE,
+  skill_id  INTEGER NOT NULL REFERENCES agent_skills(id) ON DELETE CASCADE,
+  class_id  INTEGER NOT NULL REFERENCES classes(id),
+  PRIMARY KEY (agent_id, skill_id)
+);
+
+CREATE TABLE IF NOT EXISTS tutor_agent_materials (
+  agent_id    INTEGER NOT NULL REFERENCES tutor_agents(id) ON DELETE CASCADE,
+  material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+  class_id    INTEGER NOT NULL REFERENCES classes(id),
+  PRIMARY KEY (agent_id, material_id)
+);
+
+-- 技能：空行以上元数据、空行以下正文；source_text 保留原文供教师再编辑
+CREATE TABLE IF NOT EXISTS agent_skills (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id        INTEGER NOT NULL REFERENCES classes(id),
+  name            TEXT    NOT NULL,
+  triggers        TEXT    NOT NULL,
+  material_filter TEXT    NOT NULL DEFAULT '',
+  tools           TEXT    NOT NULL DEFAULT 'knowledge_search',
+  body            TEXT    NOT NULL,
+  source_text     TEXT    NOT NULL DEFAULT '',
+  is_builtin      INTEGER NOT NULL DEFAULT 0,
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  created_by      INTEGER REFERENCES users(id),
+  created_at      TEXT    NOT NULL,
+  updated_at      TEXT    NOT NULL,
+  UNIQUE (class_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id   INTEGER NOT NULL REFERENCES classes(id),
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  agent_id   INTEGER NOT NULL REFERENCES tutor_agents(id),
+  title      TEXT    NOT NULL DEFAULT '',
+  created_at TEXT    NOT NULL,
+  updated_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  class_id        INTEGER NOT NULL REFERENCES classes(id),
+  role            TEXT    NOT NULL CHECK (role IN ('user','assistant','tool','system')),
+  content         TEXT    NOT NULL,
+  citations_json  TEXT    NOT NULL DEFAULT '[]',
+  skill_name      TEXT,
+  status          TEXT    NOT NULL DEFAULT 'ok',
+  tool_calls_json TEXT    NOT NULL DEFAULT '[]',
+  created_at      TEXT    NOT NULL
+);
+
+-- MCP 服务器：只存环境变量名，令牌本身永不入库
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id    INTEGER NOT NULL REFERENCES classes(id),
+  name        TEXT    NOT NULL,
+  base_url    TEXT    NOT NULL,
+  token_env   TEXT    NOT NULL DEFAULT '',
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT    NOT NULL,
+  updated_at  TEXT    NOT NULL,
+  UNIQUE (class_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS mcp_tool_audit (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id        INTEGER NOT NULL REFERENCES classes(id),
+  user_id         INTEGER REFERENCES users(id),
+  conversation_id INTEGER,
+  round           INTEGER NOT NULL DEFAULT 0,
+  tool_ref        TEXT    NOT NULL,
+  server          TEXT    NOT NULL,
+  status          TEXT    NOT NULL CHECK (status IN ('ok','denied','error')),
+  detail          TEXT    NOT NULL DEFAULT '',
+  created_at      TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS token_revocations (
+  jti        TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  revoked_at TEXT    NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_class      ON users(class_id);
 CREATE INDEX IF NOT EXISTS idx_materials_class  ON materials(class_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_class  ON knowledge_entries(class_id, material_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_class     ON knowledge_chunks(class_id, material_id, chunk_index);
 CREATE INDEX IF NOT EXISTS idx_chunks_material  ON knowledge_chunks(material_id);
+CREATE INDEX IF NOT EXISTS idx_agents_class     ON tutor_agents(class_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_skills_class     ON agent_skills(class_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_conv_user        ON conversations(class_id, user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_msg_conv         ON messages(conversation_id, id);
+CREATE INDEX IF NOT EXISTS idx_audit_class      ON mcp_tool_audit(class_id, created_at DESC);
 """
 
 # materials 的增量列（迁移时按需补齐，可重复执行）
@@ -460,14 +568,32 @@ SELECT c.*, m.title AS material_title, m.ext AS material_ext,
 """
 
 
-def search_chunks(class_id: int, keyword: str, limit: int = 10, offset: int = 0):
+def search_chunks(class_id: int, keyword: str, limit: int = 10, offset: int = 0,
+                  material_ids=None):
     """关键字检索（片内字面匹配）。返回 `(命中窗口, 本班匹配总数)`。
 
     命中窗口元素为 `(hit_count, match_in_chunk, row)`；
     排序键 `命中次数 DESC → material_id ASC → chunk_index ASC`。
     计数只统计本班（SQL 的 class_id 谓词已限定范围）。
+
+    `material_ids` 非 None 时把范围再收窄到「该智能体绑定的材料」；
+    **`class_id` 仍然是第一条谓词**（绑定过滤插在匹配之前、班级之后）。
     """
-    rows = query(SQL_KEYWORD_SEARCH, (int(class_id), keyword or ""))
+    sql = SQL_KEYWORD_SEARCH
+    params: list = [int(class_id)]
+    ids = None if material_ids is None else [int(x) for x in material_ids]
+    if ids is not None:
+        if not ids:
+            return [], 0
+        placeholders = ",".join("?" for _ in ids)
+        sql = sql.replace(
+            "   AND instr(",
+            f"   AND c.material_id IN ({placeholders})            -- 绑定材料收窄\n"
+            "   AND instr(",
+        )
+        params.extend(ids)
+    params.append(keyword or "")
+    rows = query(sql, tuple(params))
     needle = (keyword or "").lower()
     scored = []
     for row in rows:
@@ -477,6 +603,56 @@ def search_chunks(class_id: int, keyword: str, limit: int = 10, offset: int = 0)
             continue
         match_in_chunk = haystack.find(needle)
         scored.append((count, match_in_chunk, row))
+
+    scored.sort(key=lambda t: (-t[0], t[2]["material_id"], t[2]["chunk_index"]))
+    total_matched = len(scored)
+    window = scored[int(offset): int(offset) + int(limit)]
+    return [(item[0], item[1], item[2]) for item in window], total_matched
+
+
+def search_chunks_any_term(class_id: int, terms, limit: int = 10, offset: int = 0,
+                           material_ids=None):
+    """多词「任一命中」检索（问句用）。返回结构与 `search_chunks` 相同。
+
+    与 `search_chunks` 的区别只在匹配谓词：这里是 `OR` 多个 `instr`，
+    排序仍按「命中次数合计 DESC → material_id ASC → chunk_index ASC」。
+    `class_id` 依然是第一条谓词，`material_ids` 仍是第二层收窄。
+    """
+    words = [str(t).strip().lower() for t in (terms or []) if str(t).strip()]
+    if not words:
+        return [], 0
+
+    sql = (
+        "SELECT c.id, c.material_id, c.chunk_index, c.body_text, c.start_offset,"
+        " c.end_offset, c.line_start, c.line_end, c.char_count, c.chunk_sha256,"
+        " c.source_sha256, m.title AS material_title, m.ext AS material_ext"
+        "  FROM knowledge_chunks c"
+        "  JOIN materials m ON m.id = c.material_id"
+        " WHERE c.class_id = ?                                  -- ① 班级边界：最先\n"
+    )
+    params: list = [int(class_id)]
+
+    ids = None if material_ids is None else [int(x) for x in material_ids]
+    if ids is not None:
+        if not ids:
+            return [], 0
+        sql += f"   AND c.material_id IN ({','.join('?' for _ in ids)})    -- ② 绑定材料\n"
+        params.extend(ids)
+
+    sql += "   AND (" + " OR ".join("instr(lower(c.body_text), ?) > 0" for _ in words) + ")"
+    params.extend(words)
+
+    rows = query(sql, tuple(params))
+    scored = []
+    for row in rows:
+        haystack = row["body_text"].lower()
+        count = sum(haystack.count(word) for word in words)
+        if count <= 0:
+            continue
+        match_at = min(
+            (haystack.find(word) for word in words if word in haystack), default=0
+        )
+        scored.append((count, match_at, row))
 
     scored.sort(key=lambda t: (-t[0], t[2]["material_id"], t[2]["chunk_index"]))
     total_matched = len(scored)

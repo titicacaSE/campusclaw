@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} · CampusClaw</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<main class="page">
+  <div class="page-head">
+    <h1>{{ klass }} · MCP 工具</h1>
+    <p>服务器令牌只从服务端环境变量读取，页面与接口只能知道「是否已配令牌」。
+       技能里用 <code>工具名@服务器名</code> 引用工具；断开后调用状态为 <code>denied</code>。</p>
+  </div>
+
+  <div id="notice" class="notice" hidden></div>
+
+  {% if role == 'teacher' %}
+  <section class="card" style="margin-bottom:20px">
+    <h2 style="font-size:16px;margin-bottom:10px">登记服务器</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label>名称 <input id="srv-name" type="text" value="campusclaw" style="padding:8px"></label>
+      <label>地址 <input id="srv-url" type="text" value="http://127.0.0.1:5000" style="padding:8px;min-width:260px"></label>
+      <label>令牌环境变量 <input id="srv-env" type="text" value="MCP_SERVER_TOKEN" style="padding:8px"></label>
+      <button class="btn" id="register-btn" type="button">登记</button>
+    </div>
+  </section>
+  {% endif %}
+
+  <section style="margin-bottom:22px">
+    <h2 style="font-size:16px;margin-bottom:10px">服务器</h2>
+    <div id="servers" style="display:grid;gap:12px"></div>
+  </section>
+
+  <section style="margin-bottom:22px">
+    <h2 style="font-size:16px;margin-bottom:10px">已发现工具</h2>
+    <div id="tools" style="display:grid;gap:8px"></div>
+  </section>
+
+  <section>
+    <h2 style="font-size:16px;margin-bottom:10px">调用审计（最近 50 条）</h2>
+    <div id="audit" style="font-size:12px;color:#444"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const notice = document.getElementById('notice');
+  const isTeacher = {{ 'true' if role == 'teacher' else 'false' }};
+
+  function show(text, bad) {
+    notice.hidden = false;
+    notice.textContent = text;
+    notice.style.background = bad ? '#fdecec' : '';
+  }
+
+  function el(tag, text, style) {
+    const node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (style) node.setAttribute('style', style);
+    return node;
+  }
+
+  async function api(path, options) {
+    const res = await fetch(path, Object.assign({credentials: 'same-origin'}, options || {}));
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) throw new Error((data && (data.message || data.error)) || ('HTTP ' + res.status));
+    return data;
+  }
+
+  async function loadServers() {
+    const data = await api('/api/mcp/servers');
+    const box = document.getElementById('servers');
+    box.textContent = '';
+    data.servers.forEach(function (srv) {
+      const card = el('div', null, 'border:1px solid #e3e6ea;border-radius:10px;padding:12px;background:#fff');
+      const head = el('div', null, 'display:flex;gap:10px;align-items:center;flex-wrap:wrap');
+      head.appendChild(el('b', srv.name));
+      head.appendChild(el('span', srv.base_url, 'font-size:12px;color:#666'));
+      head.appendChild(el('span', '令牌：' + (srv.token_configured ? '已配令牌=true' : '未配置'),
+        'font-size:12px;color:' + (srv.token_configured ? '#137333' : '#b3261e')));
+      head.appendChild(el('span', srv.enabled ? '已启用' : '已停用', 'font-size:12px;color:#666'));
+      card.appendChild(head);
+
+      const out = el('div', null, 'font-size:12px;color:#444;margin-top:8px');
+      card.appendChild(out);
+
+      const bar = el('div', null, 'margin-top:8px;display:flex;gap:8px;flex-wrap:wrap');
+      const probe = el('button', '连接发现', 'padding:5px 10px');
+      probe.className = 'btn';
+      probe.onclick = async function () {
+        out.textContent = '正在连接…';
+        try {
+          const result = await api('/api/mcp/servers/' + srv.id + '/probe', {method: 'POST'});
+          if (result.ok) {
+            out.textContent = '已连接 · 工具：' +
+              (result.tools.map(function (t) { return t.name; }).join('、') || '（无）');
+          } else {
+            out.textContent = '失败：' + (result.message || result.reason);
+          }
+          await loadTools();
+        } catch (err) {
+          out.textContent = '失败：' + err.message;
+        }
+      };
+      bar.appendChild(probe);
+
+      if (isTeacher) {
+        const toggle = el('button', srv.enabled ? '断开' : '连接', 'padding:5px 10px');
+        toggle.className = 'btn';
+        toggle.onclick = async function () {
+          try {
+            await api('/api/mcp/servers/' + srv.id, {
+              method: 'PATCH',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({enabled: !srv.enabled})
+            });
+            await loadServers();
+            await loadTools();
+          } catch (err) { show(err.message, true); }
+        };
+        bar.appendChild(toggle);
+      }
+      card.appendChild(bar);
+      box.appendChild(card);
+    });
+  }
+
+  async function loadTools() {
+    const data = await api('/api/mcp/tools');
+    const box = document.getElementById('tools');
+    box.textContent = '';
+    if (!data.tools.length) {
+      box.appendChild(el('div', '未发现工具（检查服务器是否已连接、令牌是否正确）。', 'color:#666;font-size:13px'));
+      return;
+    }
+    data.tools.forEach(function (tool) {
+      const row = el('div', null, 'border:1px solid #eee;border-radius:8px;padding:10px;background:#fff');
+      const head = el('div', null, 'display:flex;gap:10px;align-items:center;flex-wrap:wrap');
+      head.appendChild(el('b', tool.ref, 'font-family:ui-monospace,Consolas,monospace;font-size:13px'));
+      head.appendChild(el('span', tool.connected ? '已连接' : '不可用',
+        'font-size:12px;color:' + (tool.connected ? '#137333' : '#b3261e')));
+      row.appendChild(head);
+      row.appendChild(el('div', tool.description || '', 'font-size:12px;color:#666;margin-top:4px'));
+      box.appendChild(row);
+    });
+  }
+
+  async function loadAudit() {
+    const data = await api('/api/mcp/audit');
+    const box = document.getElementById('audit');
+    box.textContent = '';
+    if (!data.audit.length) { box.textContent = '暂无记录。'; return; }
+    const table = document.createElement('table');
+    table.setAttribute('style', 'width:100%;border-collapse:collapse');
+    const head = table.insertRow();
+    ['时间', '工具引用', '服务器', '状态', '轮次', '会话'].forEach(function (label) {
+      const th = document.createElement('th');
+      th.textContent = label;
+      th.setAttribute('style', 'text-align:left;padding:6px;border-bottom:1px solid #ddd');
+      head.appendChild(th);
+    });
+    data.audit.forEach(function (row) {
+      const tr = table.insertRow();
+      [row.created_at, row.tool_ref, row.server, row.status, row.round,
+       row.conversation_id === null ? '-' : row.conversation_id].forEach(function (value) {
+        const td = tr.insertCell();
+        td.textContent = String(value);
+        td.setAttribute('style', 'padding:6px;border-bottom:1px solid #f1f1f1');
+      });
+    });
+    box.appendChild(table);
+  }
+
+  const registerBtn = document.getElementById('register-btn');
+  if (registerBtn) {
+    registerBtn.onclick = async function () {
+      try {
+        await api('/api/mcp/servers', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            name: document.getElementById('srv-name').value.trim(),
+            base_url: document.getElementById('srv-url').value.trim(),
+            token_env: document.getElementById('srv-env').value.trim()
+          })
+        });
+        show('已登记（令牌不回显）', false);
+        await loadServers();
+        await loadTools();
+      } catch (err) { show(err.message, true); }
+    };
+  }
+
+  Promise.all([loadServers(), loadTools(), loadAudit()]).catch(function (err) { show(err.message, true); });
+})();
+</script>
+</body>
+</html>

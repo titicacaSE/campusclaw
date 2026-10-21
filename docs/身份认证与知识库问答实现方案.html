@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>CampusClaw 身份认证与知识库问答 · 实现方案</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 15mm 15mm; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", "PingFang SC", sans-serif;
+    font-size: 10.3pt;
+    line-height: 1.72;
+    color: #1e2530;
+    background: #fff;
+  }
+  code, pre, .mono { font-family: Consolas, "Cascadia Mono", "Courier New", monospace; }
+
+  /* ---------- 封面 ---------- */
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+  .cover .eyebrow { font-size: 10pt; letter-spacing: .28em; color: #0f766e; font-weight: 700; }
+  .cover h1 { font-size: 27pt; line-height: 1.28; margin: 14px 0 6px; color: #101828; letter-spacing: -.5px; }
+  .cover h1 .sub { display: block; font-size: 15pt; font-weight: 400; color: #475467; margin-top: 10px; letter-spacing: 0; }
+  .cover .rule { width: 78px; height: 5px; background: #0f766e; margin: 22px 0 26px; border-radius: 3px; }
+  .cover .lead { font-size: 11.2pt; color: #344054; max-width: 155mm; }
+  .meta { margin-top: 34px; border-collapse: collapse; width: 100%; font-size: 9.6pt; }
+  .meta th, .meta td { border: 1px solid #dfe4ec; padding: 6px 10px; text-align: left; vertical-align: top; }
+  .meta th { background: #f4f7f9; width: 26mm; font-weight: 600; color: #3c4a5a; }
+  .badge-row { margin-top: 22px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge { border: 1px solid #cfe3e0; background: #f0fafa; color: #0f766e; border-radius: 999px; padding: 4px 13px; font-size: 9pt; font-weight: 600; }
+
+  /* ---------- 章节 ---------- */
+  .chapter { page-break-before: always; }
+  h2 {
+    font-size: 15pt; margin: 0 0 4px; color: #101828; letter-spacing: -.3px;
+    padding-bottom: 7px; border-bottom: 2.5px solid #0f766e;
+  }
+  h2 .num { color: #0f766e; margin-right: 9px; }
+  h3 { font-size: 12.2pt; margin: 20px 0 7px; color: #0f766e; page-break-after: avoid; }
+  h4 { font-size: 10.8pt; margin: 15px 0 5px; color: #1e2530; page-break-after: avoid; }
+  p { margin: 7px 0; }
+  ul, ol { margin: 7px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  strong { color: #101828; }
+  .lead-in { color: #475467; margin-bottom: 4px; }
+
+  /* ---------- 表格 ---------- */
+  table.t { border-collapse: collapse; width: 100%; margin: 11px 0; font-size: 9.5pt; }
+  table.t th, table.t td { border: 1px solid #dfe4ec; padding: 6px 9px; text-align: left; vertical-align: top; }
+  table.t th { background: #f4f7f9; font-weight: 600; color: #344054; }
+  table.t tr { page-break-inside: avoid; }
+  table.t code { font-size: 9pt; background: #f4f7f9; padding: 1px 4px; border-radius: 3px; }
+
+  /* ---------- 代码 ---------- */
+  pre {
+    background: #f7f9fb; border: 1px solid #e4e9f0; border-left: 3px solid #0f766e;
+    border-radius: 4px; padding: 9px 12px; margin: 9px 0; font-size: 8.9pt;
+    line-height: 1.62; overflow-x: hidden; white-space: pre-wrap; word-break: break-word;
+    page-break-inside: avoid; color: #1f2a37;
+  }
+  code { font-size: 9pt; background: #f4f7f9; padding: 1px 4px; border-radius: 3px; color: #0b5f59; }
+  pre code { background: none; padding: 0; color: inherit; font-size: 8.9pt; }
+
+  /* ---------- 提示块 ---------- */
+  .box { border: 1px solid #e4e9f0; border-left: 4px solid #0f766e; background: #f8fbfb; border-radius: 4px; padding: 9px 13px; margin: 11px 0; page-break-inside: avoid; }
+  .box .lbl { display: block; font-weight: 700; color: #0f766e; font-size: 9.4pt; letter-spacing: .04em; margin-bottom: 2px; }
+  .box.warn { border-left-color: #b45309; background: #fffbf5; }
+  .box.warn .lbl { color: #b45309; }
+  .box.quote { border-left-color: #475467; background: #f8fafc; font-size: 9.4pt; color: #344054; }
+  .box.quote .lbl { color: #475467; }
+  .box p:first-of-type { margin-top: 2px; }
+  .box p:last-child { margin-bottom: 2px; }
+
+  /* ---------- 图（HTML/CSS 布局，文字按真实字号换行） ---------- */
+  figure { margin: 13px 0; page-break-inside: avoid; }
+  figcaption { font-size: 9pt; color: #667085; margin-top: 6px; text-align: center; }
+  .flow { display: flex; align-items: stretch; flex-wrap: wrap; gap: 6px; }
+  .node {
+    border: 1px solid #cfe3e0; background: #f8fbfb; border-radius: 5px;
+    padding: 6px 10px; font-size: 9.2pt; font-weight: 600; color: #0b5f59;
+    text-align: center; flex: 0 1 auto; line-height: 1.45;
+  }
+  .node.plain { border-color: #dfe4ec; background: #f9fafb; color: #344054; }
+  .node.accent { border-color: #0f766e; background: #f0fafa; }
+  .node.dark { border-color: #b45309; background: #fffbf5; color: #92400e; }
+  .node.bad { border-color: #a13a1c; background: #fdf0ec; color: #a13a1c; }
+  .node .sub { display: block; font-weight: 400; font-size: 8.4pt; color: #667085; margin-top: 1px; }
+  .arrow { align-self: center; color: #98a2b3; font-size: 12pt; flex: 0 0 auto; padding: 0 1px; }
+  .band { border: 1px dashed #b45309; background: #fffbf5; border-radius: 5px; padding: 6px 10px;
+          font-size: 8.9pt; color: #92400e; font-weight: 600; }
+  .band.ok { border-color: #0b6b4f; background: #e8f6f1; color: #0b6b4f; }
+  .lane { display: flex; align-items: center; gap: 8px; margin: 9px 0; }
+  .lane .cap { flex: 0 0 20mm; font-size: 9.2pt; font-weight: 700; color: #0f766e; }
+
+  /* ---------- 目录 ---------- */
+  .toc { column-count: 2; column-gap: 14mm; font-size: 9.8pt; }
+  .toc div { break-inside: avoid; margin: 2.5px 0; }
+  .toc .l1 { font-weight: 700; color: #101828; margin-top: 9px; }
+  .toc .l2 { padding-left: 12px; color: #475467; }
+
+  .kpi { display: flex; gap: 9px; margin: 13px 0; flex-wrap: wrap; }
+  .kpi .card { flex: 1 1 0; border: 1px solid #dfe4ec; border-radius: 5px; padding: 9px 11px; background: #fbfcfd; }
+  .kpi .v { font-size: 14pt; font-weight: 700; color: #0f766e; line-height: 1.25; }
+  .kpi .k { font-size: 8.6pt; color: #667085; margin-top: 2px; }
+  .tag { display: inline-block; font-size: 8.4pt; font-weight: 700; border-radius: 3px; padding: 1px 6px; }
+  .tag.ok { background: #e8f6f1; color: #0b6b4f; }
+  .tag.no { background: #fdf0ec; color: #a13a1c; }
+  .footnote { font-size: 8.8pt; color: #667085; border-top: 1px solid #e4e9f0; margin-top: 16px; padding-top: 7px; }
+</style>
+</head>
+<body>
+
+<!-- ============================ 封面 ============================ -->
+<section class="cover">
+  <div class="eyebrow">CAMPUSCLAW · 学期工程</div>
+  <h1>身份认证与知识库问答
+    <span class="sub">结合现有代码的实现方案梳理</span>
+  </h1>
+  <div class="rule"></div>
+  <p class="lead">
+    本文档把 CampusClaw「第 4 课」交付物中的两条主线拆开讲清楚：<strong>登录态是怎么建立、携带与校验的</strong>，
+    以及<strong>一条提问是怎么被检索证据支撑、再交给生成模型作答的</strong>。
+    所有描述都以仓库中真实存在的代码与规约为依据，并给出可复核的验证结论。
+  </p>
+
+  <table class="meta">
+    <tr><th>项目</th><td>CampusClaw · 班级知识库与教学助手（学期版）</td></tr>
+    <tr><th>代码基线</th><td><code>campusclaw-semester</code>，本地提交 <code>6d1a699</code>（分支 <code>main</code>）</td></tr>
+    <tr><th>技术栈</th><td>CPython 3.13 · Flask 3.x · SQLite 3（标准库）· bcrypt · Qdrant · 课程网关（OpenAI 兼容）</td></tr>
+    <tr><th>规约来源</th><td><code>openspec/changes/add-traceable-vector-retrieval/</code>（proposal · design · spec · tasks）</td></tr>
+    <tr><th>文档版本</th><td>v1.0</td></tr>
+    <tr><th>日期</th><td>2026-10-13</td></tr>
+  </table>
+
+  <div class="badge-row">
+    <span class="badge">会话签名令牌</span>
+    <span class="badge">班级强隔离</span>
+    <span class="badge">三模式检索</span>
+    <span class="badge">RRF k=60</span>
+    <span class="badge">阈值 0.35</span>
+    <span class="badge">有依据才生成</span>
+    <span class="badge">可溯源引用</span>
+  </div>
+</section>
+
+<!-- ============================ 目录 ============================ -->
+<section class="chapter">
+  <h2><span class="num">目录</span></h2>
+  <div class="toc">
+    <div class="l1">1　文档说明</div>
+    <div class="l2">1.1 目的与范围</div>
+    <div class="l2">1.2 结论摘要</div>
+    <div class="l2">1.3 术语约定</div>
+
+    <div class="l1">2　系统总览</div>
+    <div class="l2">2.1 进程与部署结构</div>
+    <div class="l2">2.2 端到端链路</div>
+    <div class="l2">2.3 模块职责划分</div>
+
+    <div class="l1">3　身份认证实现方案</div>
+    <div class="l2">3.1 设计约束：为什么是服务端会话</div>
+    <div class="l2">3.2 口令凭据的存储</div>
+    <div class="l2">3.3 会话令牌：签名 Cookie</div>
+    <div class="l2">3.4 登录 / 登出时序</div>
+    <div class="l2">3.5 会话端点契约</div>
+    <div class="l2">3.6 鉴权与授权机制</div>
+    <div class="l2">3.7 班级隔离：唯一授权来源</div>
+    <div class="l2">3.8 会话令牌与 Bearer Token 的取舍</div>
+    <div class="l2">3.9 安全核对清单</div>
+
+    <div class="l1">4　知识库问答实现方案</div>
+    <div class="l2">4.1 总体原则：先检索，后生成</div>
+    <div class="l2">4.2 资料入库与索引流水线</div>
+    <div class="l2">4.3 切分策略与坐标系统</div>
+    <div class="l2">4.4 索引生命周期与两阶段事务</div>
+    <div class="l2">4.5 三模式检索</div>
+    <div class="l2">4.6 融合公式与阈值</div>
+    <div class="l2">4.7 向量库集成要点</div>
+    <div class="l2">4.8 课程网关适配层</div>
+    <div class="l2">4.9 问答生成：上下文与提示</div>
+    <div class="l2">4.10 无命中纪律</div>
+    <div class="l2">4.11 引用一致性与溯源</div>
+    <div class="l2">4.12 降级与错误码矩阵</div>
+
+    <div class="l1">5　接口契约总表</div>
+
+    <div class="l1">6　验证与证据</div>
+    <div class="l2">6.1 测试矩阵</div>
+    <div class="l2">6.2 验证结果</div>
+    <div class="l2">6.3 结论边界</div>
+
+    <div class="l1">7　附录</div>
+    <div class="l2">7.1 环境变量</div>
+    <div class="l2">7.2 数据表结构</div>
+    <div class="l2">7.3 固化常量</div>
+  </div>
+</section>
+
+<!-- ============================ 1 ============================ -->
+<section class="chapter">
+  <h2><span class="num">1</span>文档说明</h2>
+
+  <h3>1.1 目的与范围</h3>
+  <p>本文档回答两个问题：</p>
+  <ol>
+    <li><strong>身份认证是怎么做的</strong>——登录凭证长什么样、存在哪、谁来签发、每一步如何校验，以及「班级」这条安全边界在哪些位置被反复确认。</li>
+    <li><strong>知识库问答是怎么做的</strong>——一份材料从上传到能被检索经历了什么，一次提问如何被转换成「有证据支撑的回答」，以及在没有证据时系统如何克制自己。</li>
+  </ol>
+  <p>范围限于第 4 课交付物所覆盖的代码，不含前端工程化、流式输出、跨班检索等被规约明确排除在外的能力。</p>
+
+  <div class="box quote">
+    <span class="lbl">阅读须知</span>
+    <p>文中所有行为描述都以仓库中的代码、规约为唯一依据。代码路径均以 <code>campusclaw-semester/</code> 为根；引用规约时给出 <code>openspec/</code> 下的文件位置，不引用任何聊天记录。</p>
+  </div>
+
+  <h3>1.2 结论摘要</h3>
+  <div class="kpi">
+    <div class="card"><div class="v">签名会话令牌</div><div class="k">登录态由 HttpOnly Cookie 承载，不使用 Bearer Token</div></div>
+    <div class="card"><div class="v">三道班级闸门</div><div class="k">SQL 首谓词 ＋ 向量 pre-filter ＋ 回表复检</div></div>
+    <div class="card"><div class="v">0 命中 → 0 次调用</div><div class="k">无证据时不触碰生成模型</div></div>
+  </div>
+  <ul>
+    <li><strong>认证</strong>：采用服务端会话，登录态由一枚经服务端密钥签名的会话 Cookie 承载；口令以 bcrypt 单向哈希入库；未登录访问页面跳转 <code>/login</code>，访问 API 得到 401 JSON。</li>
+    <li><strong>授权</strong>：班级范围<strong>只</strong>取自服务端会话，请求中任何位置出现的 <code>class_id</code> / <code>role</code> / <code>user_id</code> 一律丢弃。</li>
+    <li><strong>问答</strong>：严格「先检索、后生成」；检索在<strong>本班前 4 条</strong>切片内进行；无命中时接口直接返回固定文案并保持 HTTP 200，且<strong>不产生任何生成模型调用</strong>。</li>
+    <li><strong>可溯源</strong>：回答中的 <code>[n]</code> 与 <code>citations[]</code> 一一对应，越界引用会被剔除并记入日志。</li>
+  </ul>
+
+  <h3>1.3 术语约定</h3>
+  <table class="t">
+    <tr><th style="width:32mm">术语</th><th>含义</th></tr>
+    <tr><td><strong>会话令牌</strong></td><td>登录成功后由服务端签发、经服务端密钥签名、随请求自动回传的一串文本。本项目即 <code>campusclaw_session</code> Cookie 的值。</td></tr>
+    <tr><td><strong>班级隔离</strong></td><td>任何一次数据读写都必须落在登录者所属班级内；跨班访问对外表现为「查不到」，而非「无权访问」。</td></tr>
+    <tr><td><strong>切片（chunk）</strong></td><td>材料正文按策略切开后的最小检索单元，落库于 <code>knowledge_chunks</code>，其 <code>id</code> 同时是向量库中的点 id。</td></tr>
+    <tr><td><strong>证据（hit）</strong></td><td>一次检索命中的切片及其得分、名次等元信息。问答模块只依据 hit 作答。</td></tr>
+    <tr><td><strong>降级</strong></td><td>嵌入网关或向量库不可用时，关键字检索仍可用，向量相关模式明确失败（503），而不是返回伪造结果。</td></tr>
+    <tr><td><strong>RRF</strong></td><td>Reciprocal Rank Fusion，按「名次」而非「分数」融合多路检索结果，本项目常数 <code>k=60</code>。</td></tr>
+  </table>
+</section>
+
+<!-- ============================ 2 ============================ -->
+<section class="chapter">
+  <h2><span class="num">2</span>系统总览</h2>
+
+  <h3>2.1 进程与部署结构</h3>
+  <p>应用由 Flask 应用工厂 <code>app/__init__.py:create_app()</code> 组装，注册五个 Blueprint：</p>
+  <table class="t">
+    <tr><th style="width:34mm">Blueprint</th><th style="width:34mm">模块</th><th>职责</th></tr>
+    <tr><td><code>main</code></td><td><code>app/main.py</code></td><td>站点首页与 <code>GET /health</code>（免登录探活）</td></tr>
+    <tr><td><code>auth</code></td><td><code>app/auth.py</code></td><td>页面会话：表单登录、登出、<code>login_required</code> / <code>teacher_required</code> 装饰器、口令哈希与校验</td></tr>
+    <tr><td><code>api_auth</code></td><td><code>app/api_auth.py</code></td><td>会话的三个 JSON 端点：<code>/api/login</code>、<code>/api/logout</code>、<code>/api/me</code></td></tr>
+    <tr><td><code>materials</code></td><td><code>app/materials.py</code></td><td>材料上传、列表分页、详情、下载、重建索引、向量对照</td></tr>
+    <tr><td><code>search</code></td><td><code>app/search.py</code></td><td>检索 <code>/api/search</code>、问答 <code>/api/ask</code>、来源读取、检索页面</td></tr>
+  </table>
+  <p>外部依赖只有两个：<strong>课程网关</strong>（OpenAI 兼容的 <code>/embeddings</code> 与 <code>/chat/completions</code>）与<strong>向量库 Qdrant</strong>。两者都通过标准库 <code>urllib</code> 直连，不引入第三方 SDK，且<strong>传输层可注入</strong>，这让离线验收成为可能。</p>
+
+  <div class="box warn">
+    <span class="lbl">关键配置纪律</span>
+    <p><code>SECRET_KEY</code>（会话签名密钥）<strong>缺失或短于 16 字符时应用直接启动失败</strong>，禁止任何不安全默认值；而网关与向量库的配置<strong>缺失时不影响启动</strong>——此时 <code>keyword</code> 模式照常工作，向量相关模式按降级语义返回 503。</p>
+  </div>
+
+  <h3>2.2 端到端链路</h3>
+  <p>下图把「登录」与「问答」两条链路放在一起，可以直观看到会话令牌在整条链路中的位置：它是<strong>唯一</strong>携带身份信息的载体，而班级范围在进入检索层之前就已经从会话中取出并固定。</p>
+
+  <figure>
+    <div class="lane">
+      <div class="cap">① 登录</div>
+      <div class="flow">
+        <div class="node plain">浏览器</div>
+        <span class="arrow">→</span>
+        <div class="node accent">POST /api/login<span class="sub">username · password</span></div>
+        <span class="arrow">→</span>
+        <div class="node">校验口令 → 写入会话<span class="sub">user_id · role · class_id</span></div>
+        <span class="arrow">→</span>
+        <div class="node accent">Set-Cookie<span class="sub">HttpOnly · SameSite=Lax</span></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="cap">② 问答</div>
+      <div class="flow">
+        <div class="node plain">浏览器</div>
+        <span class="arrow">→</span>
+        <div class="node accent">POST /api/ask<span class="sub">自动携带 Cookie</span></div>
+        <span class="arrow">→</span>
+        <div class="node">验签 → 取 class_id<span class="sub">丢弃请求中的班级字段</span></div>
+        <span class="arrow">→</span>
+        <div class="node">检索本班前 4 条</div>
+        <span class="arrow">→</span>
+        <div class="node accent">有命中才生成</div>
+      </div>
+    </div>
+    <figcaption>图 2-1　会话令牌贯穿两条链路：签到与校验都用同一枚 Cookie，班级范围只在服务端取一次。</figcaption>
+  </figure>
+
+  <h3>2.3 模块职责划分</h3>
+  <p>认证与问答两条主线的代码落点如下，后续章节按此展开。</p>
+  <table class="t">
+    <tr><th style="width:46mm">文件</th><th>职责</th></tr>
+    <tr><td><code>app/auth.py</code></td><td>口令哈希与校验（bcrypt）、会话写入 <code>login_session()</code>、当前用户 <code>current_user()</code>、鉴权装饰器、页面登录 / 登出路由</td></tr>
+    <tr><td><code>app/api_auth.py</code></td><td>会话的 JSON 端点；失败响应同形化，避免账号枚举</td></tr>
+    <tr><td><code>app/db.py</code></td><td>SQLite 访问层：建表与迁移、关键字检索 SQL、按班级读取的一切查询</td></tr>
+    <tr><td><code>app/chunking.py</code></td><td>正文预处理（换行归一、空白折叠、链接剥离、NFC）与三种切分策略</td></tr>
+    <tr><td><code>app/indexing.py</code></td><td>索引编排：切片入库 → 嵌入 → 写向量 → 维护 <code>index_status</code></td></tr>
+    <tr><td><code>app/retrieval.py</code></td><td>三模式检索、RRF 融合、阈值过滤、输入校验、统一的 hit 数据模型</td></tr>
+    <tr><td><code>app/vector_store.py</code></td><td>Qdrant 最小子集客户端（集合、写入、删除、带 pre-filter 的检索）</td></tr>
+    <tr><td><code>app/gateway.py</code></td><td>课程网关适配：嵌入与对话两个接口的请求形状、维度守卫、超时</td></tr>
+    <tr><td><code>app/qa.py</code></td><td>问答编排：上下文组装、system 提示、引用解析、无命中短路</td></tr>
+    <tr><td><code>app/materials.py</code></td><td>材料上传流水线（切分 → 落库 → 嵌入）、重建索引、向量对照</td></tr>
+    <tr><td><code>app/search.py</code></td><td>检索 / 问答 / 来源 / 页面四组 HTTP 端点，负责把领域异常映射为状态码</td></tr>
+    <tr><td><code>scripts/</code></td><td>建库、建集合、回填索引、规约校验、交付物静态校验</td></tr>
+  </table>
+</section>
+
+<!-- ============================ 3 ============================ -->
+<section class="chapter">
+  <h2><span class="num">3</span>身份认证实现方案</h2>
+  <p class="lead-in">本章先说明「为什么是这套方案」，再逐层拆解令牌的形态、签发与校验位置，最后单独讲班级隔离这条安全边界。</p>
+
+  <h3>3.1 设计约束：为什么是服务端会话</h3>
+  <p>方案不是自由选择的结果，而是规约硬性约束下的唯一解。规约 <code>openspec/changes/add-traceable-vector-retrieval/specs/traceable-vector-retrieval/spec.md</code> 中的相关条款原文：</p>
+
+  <div class="box quote">
+    <span class="lbl">Requirement：认证沿用服务端会话</span>
+    <p>第 4 课 MUST 沿用第 3 课的<strong>服务端会话 Cookie</strong> 认证，MUST NOT 引入客户端持有凭据的登录方案。会话中 MUST 存有该用户的 <code>class_id</code>，检索与问答模块 MUST 只从请求上下文读取班级。</p>
+    <p><strong>Scenario：会话 Cookie 即登录态</strong> —— WHEN 调用 <code>POST /api/login</code> 并成功后查看浏览器存储，THEN 登录态由 <code>HttpOnly</code> 会话 Cookie 承载，<strong>AND 响应体与 <code>localStorage</code> 中不出现用于后续鉴权的 bearer token</strong>。</p>
+  </div>
+
+  <p>这条约束带来三个直接的设计后果：</p>
+  <ol>
+    <li><strong>不使用浏览器端持有凭据的登录方案</strong>。令牌不下发到 JS 可读的位置，因此不存在「前端把令牌存 <code>localStorage</code> 再手动塞进 <code>Authorization</code> 头」这类写法。</li>
+    <li><strong>会话必须携带 <code>class_id</code></strong>，且它是后续所有数据访问的授权来源。</li>
+    <li><strong>检索与问答模块不得自行解析班级</strong>，只能从请求上下文（即会话）读取。</li>
+  </ol>
+
+  <h3>3.2 口令凭据的存储</h3>
+  <p>口令走单向哈希，数据库中没有、也禁止有明文口令列。<code>app/db.py</code> 中 <code>users</code> 表的定义明确写下了这条约束：</p>
+
+  <pre><code>CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT    NOT NULL UNIQUE,
+  display_name  TEXT    NOT NULL,
+  role          TEXT    NOT NULL CHECK (role IN ('teacher','student')),
+  class_id      INTEGER NOT NULL REFERENCES classes(id),
+  password_hash TEXT    NOT NULL,   -- 仅存单向哈希，禁止明文 password 列（NFR-01）
+  created_at    TEXT    NOT NULL
+);</code></pre>
+
+  <table class="t">
+    <tr><th style="width:36mm">环节</th><th>实现</th></tr>
+    <tr><td>哈希算法</td><td>bcrypt（<code>app/auth.py</code> 的 <code>hash_password()</code> / <code>verify_password()</code>），自带盐与可调代价因子</td></tr>
+    <tr><td>校验方式</td><td>恒定时间比对；不因用户是否存在而改变响应体</td></tr>
+    <tr><td>角色约束</td><td>数据库层 <code>CHECK (role IN ('teacher','student'))</code>，非法角色写不进去</td></tr>
+    <tr><td>批量种子</td><td><code>app/seed.py</code> 写入演示账号时同样只存哈希，便于一键复现验收</td></tr>
+  </table>
+
+  <h3>3.3 会话令牌：签名 Cookie</h3>
+  <p>登录成功后，服务端把身份信息写进 Flask 的 <code>session</code> 对象；Flask 会把它序列化、<strong>用 <code>SECRET_KEY</code> 签名</strong>，再通过 <code>Set-Cookie</code> 交给浏览器。<code>app/auth.py</code> 中固化了会话承载的字段集合：</p>
+
+  <pre><code>SESSION_KEYS = ("user_id", "username", "display_name", "role", "class_id")</code></pre>
+
+  <h4>令牌的形态</h4>
+  <p>令牌（即 Cookie 值）由三段以点号连接而成，这是 <code>URLSafeTimedSerializer</code> 的标准输出：</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node accent" style="flex:1 1 0">base64url(payload)<span class="sub">会话字段 user_id / role / class_id …</span></div>
+      <span class="arrow">.</span>
+      <div class="node accent">timestamp<span class="sub">签发时间</span></div>
+      <span class="arrow">.</span>
+      <div class="node" style="flex:1 1 0">HMAC 签名<span class="sub">由 SECRET_KEY 派生 · 服务端独有</span></div>
+    </div>
+    <p style="font-size:9.3pt;margin:8px 0 0">
+      <strong>可读性：</strong>前两段是 base64 编码，客户端可以解出内容 —— 但改不动第三段。<br>
+      <strong>不可伪造：</strong>任何字段改动都会让签名校验失败，服务端随即视为「未登录」。
+    </p>
+    <figcaption>图 3-1　会话令牌结构：签名保证完整性，但不做加密。</figcaption>
+  </figure>
+
+  <div class="box warn">
+    <span class="lbl">这一点必须说清楚</span>
+    <p>会话令牌是<strong>签名</strong>而非<strong>加密</strong>。也就是说，用户能 <code>base64 -d</code> 出自己那份 payload，看到 <code>user_id</code>、<code>class_id</code> 等字段。<strong>这本身不构成漏洞</strong>——因为签名由 <code>SECRET_KEY</code> 生成，客户端无法为篡改后的 payload 伪造出合法签名；安全边界建立在「服务端每次都用密钥验签」之上，而不是「用户看不懂内容」之上。</p>
+    <p>真正的风险点是 <code>SECRET_KEY</code> 泄露：一旦泄露，攻击者可以为任意 <code>class_id</code> 签出合法令牌。因此它被强制只能来自环境变量。</p>
+  </div>
+
+  <h4>Cookie 属性</h4>
+  <p><code>app/__init__.py</code> 的 <code>create_app()</code> 中显式设定了四项：</p>
+  <pre><code>SESSION_COOKIE_NAME     = "campusclaw_session",
+SESSION_COOKIE_HTTPONLY = True,     # 禁止 JS 读取（document.cookie 取不到）
+SESSION_COOKIE_SAMESITE = "Lax",    # 跨站请求不自动携带，缓解 CSRF
+SESSION_COOKIE_PATH     = "/",</code></pre>
+
+  <table class="t">
+    <tr><th style="width:30mm">属性</th><th style="width:22mm">值</th><th>作用</th></tr>
+    <tr><td><code>HttpOnly</code></td><td>True</td><td>令牌对 JavaScript 不可见，XSS 无法直接窃取登录态</td></tr>
+    <tr><td><code>SameSite</code></td><td>Lax</td><td>顶层导航之外的跨站请求不携带该 Cookie，降低 CSRF 面</td></tr>
+    <tr><td><code>Path</code></td><td>/</td><td>全站有效</td></tr>
+    <tr><td><code>Secure</code></td><td>未开启</td><td>本地以 HTTP 运行，开发便利优先；<strong>生产部署必须补上</strong></td></tr>
+  </table>
+
+  <h4>签名密钥的约束</h4>
+  <p><code>_secret_key()</code> 在应用启动最早期执行校验，不满足条件直接抛 <code>ConfigError</code> 终止启动：</p>
+  <pre><code>value = overrides.get("SECRET_KEY") or os.environ.get("SECRET_KEY")
+if value is None or not str(value).strip():
+    raise ConfigError("缺少环境变量 SECRET_KEY：会话签名密钥仅允许通过服务端环境变量注入…")
+if len(value) &lt; MIN_SECRET_KEY_LEN:          # MIN_SECRET_KEY_LEN = 16
+    raise ConfigError("SECRET_KEY 长度不足 16 字符，属于不安全默认值…")</code></pre>
+  <p>这样做换来一个明确的失败语义：<strong>配置不当是启动期错误，不会以「能跑但用着不安全」的形态悄悄上线</strong>。</p>
+
+  <h3>3.4 登录 / 登出时序</h3>
+  <table class="t">
+    <tr><th style="width:12mm">#</th><th style="width:34mm">流向</th><th>说明</th></tr>
+    <tr><td>①</td><td>浏览器 → 服务端</td><td>提交凭据（JSON 正文或表单，两种方式共用同一套解析）</td></tr>
+    <tr><td>②</td><td>服务端 → SQLite</td><td>按 <code>username</code> 读取用户行</td></tr>
+    <tr><td>③</td><td>服务端</td><td>用 bcrypt 校验口令；<strong>失败时「用户名不存在」与「口令错误」返回同形 401</strong></td></tr>
+    <tr><td>④</td><td>服务端</td><td><code>login_session()</code> 写入会话五个字段</td></tr>
+    <tr><td>⑤</td><td>服务端 → 浏览器</td><td>200 ＋ <code>Set-Cookie</code>（签名令牌，HttpOnly · SameSite=Lax · Path=/）</td></tr>
+    <tr><td>⑥</td><td>浏览器 → 服务端</td><td>后续请求由浏览器<strong>自动</strong>携带 Cookie，前端无需任何代码参与</td></tr>
+    <tr><td>⑦</td><td>服务端</td><td>验签 → 读取会话 → 以其中的 <code>class_id</code> 作为本次请求的授权范围</td></tr>
+    <tr><td>⑧</td><td>服务端 → 浏览器</td><td>登出：<code>session.clear()</code> ＋ 令 Cookie 失效；重复调用仍返回 200（幂等）</td></tr>
+  </table>
+
+  <h3>3.5 会话端点契约</h3>
+  <p><code>app/api_auth.py</code> 提供三个 JSON 端点。它们与页面登录<strong>共用同一套会话写入函数与同一枚 Cookie</strong>，因此页面登录后调 API 同样被认可，反之亦然。</p>
+
+  <table class="t">
+    <tr><th style="width:26mm">方法</th><th style="width:24mm">路径</th><th style="width:18mm">鉴权</th><th>行为</th></tr>
+    <tr><td><code>POST</code></td><td><code>/api/login</code></td><td>免登录</td><td>成功 200，返回画像并下发会话 Cookie；失败 <strong>401</strong> 且<strong>不下发</strong>会话</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/logout</code></td><td>免登录</td><td>清空会话并让 Cookie 失效；<strong>重复调用仍 200</strong></td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/me</code></td><td>需登录</td><td>返回当前会话画像；未登录 401</td></tr>
+    <tr><td><code>GET</code> / <code>POST</code></td><td><code>/login</code></td><td>免登录</td><td>页面登录表单；成功后 302 跳转</td></tr>
+    <tr><td><code>GET</code> / <code>POST</code></td><td><code>/logout</code></td><td>免登录</td><td>页面登出，清空会话并重定向</td></tr>
+  </table>
+
+  <h4>成功响应（<code>/api/login</code>、<code>/api/me</code>）</h4>
+  <pre><code>{
+  "user_id": 3, "username": "student01", "display_name": "学生甲",
+  "role": "student", "class_id": 1, "class_name": "高一（1）班",
+  "ok": true            // /api/me 为 "authenticated": true
+}</code></pre>
+  <p>画像中的 <code>class_id</code> / <code>class_name</code> 来自服务端会话与数据库，<strong>不接受客户端输入覆盖</strong>。</p>
+
+  <h4>失败响应：同形化</h4>
+  <div class="box">
+    <span class="lbl">反账号枚举</span>
+    <p>「用户名不存在」与「口令错误」返回<strong>完全相同的状态码与响应体</strong>，不泄露账号是否存在，也不回显任何哈希片段：</p>
+    <pre><code>HTTP 401
+{"error": "invalid_credentials", "message": "用户名或密码不正确"}</code></pre>
+  </div>
+
+  <h3>3.6 鉴权与授权机制</h3>
+  <p><code>app/auth.py</code> 提供两个装饰器，按「谁可以调用」把端点分成两档：</p>
+  <table class="t">
+    <tr><th style="width:36mm">装饰器</th><th>语义</th><th style="width:52mm">典型使用</th></tr>
+    <tr><td><code>login_required</code></td><td>会话有效即可，教师与学生均可</td><td>检索、问答、来源读取、材料列表与下载</td></tr>
+    <tr><td><code>teacher_required</code></td><td>会话有效且 <code>role == 'teacher'</code></td><td>材料上传（表单与 API 两个入口）</td></tr>
+  </table>
+
+  <h4>两类失败响应：按请求形态分流</h4>
+  <p><code>is_api_request()</code> 判断当前请求是否为接口调用，据此返回不同的失败形态——这直接对应规约 FR-01 S3：</p>
+  <table class="t">
+    <tr><th style="width:30mm">请求类型</th><th style="width:20mm">状态码</th><th>响应</th></tr>
+    <tr><td>页面请求</td><td><code>302</code></td><td>重定向至 <code>/login</code>，浏览器自然回到登录页</td></tr>
+    <tr><td>API 请求</td><td><code>401</code></td><td>JSON <code>{"error": "unauthorized", …}</code>，前端据此清理并跳登录页</td></tr>
+    <tr><td>角色不符</td><td><code>403</code></td><td>JSON，附 <code>required_role</code> 与 <code>your_role</code>，便于定位</td></tr>
+  </table>
+  <p>免登录的例外只有一个：<code>GET /health</code>，它既不需要会话也不参与重定向，用于容器探活。</p>
+
+  <h4>会话指向已删除用户</h4>
+  <p>若验签通过但 <code>user_id</code> 在库中已不存在（例如管理员删号），<code>/api/me</code> 会<strong>清空会话并按未登录处理</strong>，避免留下悬空登录态。</p>
+
+  <h3>3.7 班级隔离：唯一授权来源</h3>
+  <p>这是整套方案里最需要被反复确认的一条边界。设计原则一句话：<strong>班级范围只在服务端会话里存在，其他任何地方传来的都不可信</strong>。</p>
+
+  <h4>第一道：丢弃客户端声明</h4>
+  <p><code>app/search.py</code> 明确列出可能被客户端用来「声明」班级的字段，读到即丢弃并留审计日志：</p>
+  <pre><code>IGNORED_CLIENT_FIELDS = ("class_id", "class", "classId", "role", "user_id", "userId")
+
+def _session_scope() -&gt; tuple[int, str]:
+    """唯一授权来源：会话。"""
+    return int(session["class_id"]), str(session["role"])</code></pre>
+  <p>查询字符串、JSON 正文、表单中出现的上述字段全部被忽略；响应因此与「不携带这些字段时」<strong>逐字段相同</strong>。</p>
+
+  <h4>第二道：SQL 首条谓词即班级</h4>
+  <p>关键字检索的 SQL 常量把班级条件放在最前、且是单表谓词，匹配与计数都发生在班级范围之内：</p>
+  <pre><code>SQL_KEYWORD_SEARCH = """
+SELECT c.id, c.material_id, c.chunk_index, c.body_text, c.start_offset, c.end_offset,
+       c.line_start, c.line_end, c.char_count, c.chunk_sha256, c.source_sha256,
+       m.title AS material_title, m.ext AS material_ext
+  FROM knowledge_chunks c
+  JOIN materials m ON m.id = c.material_id
+ WHERE c.class_id = ?                              -- ① 班级边界：最先、单表谓词
+   AND instr(lower(c.body_text), lower(?)) &gt; 0     -- ② 匹配：仅在班级范围内
+"""</code></pre>
+  <p>按 id 读取切片同样带双条件，使「跨班」与「不存在」在 SQL 层就不可区分：</p>
+  <pre><code>-- SQL_CHUNK_BY_ID
+ WHERE c.id = ? AND c.class_id = ?      -- 双条件：跨班与不存在一律查不到</code></pre>
+  <p>审计场景另有一个不带班级过滤的 <code>get_chunk_any()</code>，其注释写明<strong>调用方不得把结果直接返回给客户端</strong>。</p>
+
+  <h4>第三道：向量侧 pre-filter ＋ 回表复检</h4>
+  <p>向量检索同样把班级作为前置过滤条件下发，并在拿到候选后<strong>回关系库再带一次班级</strong>，形成双保险：</p>
+  <pre><code># app/vector_store.py —— 过滤条件随检索请求一起下发
+"filter": {"must": [{"key": "class_id", "match": {"value": int(class_id)}}]}
+
+# app/retrieval.py —— 回表时为每一行再确认一次班级
+row = db.get_chunk(int(chunk_id), class_id)   # ② 回表双保险：必须再带 class_id
+if row is None:
+    continue</code></pre>
+  <p>此外阈值在本地再判一次。也就是说，即便向量库返回了越界或低分候选，也无法穿透到最终结果。</p>
+
+  <h4>跨班的对外语义</h4>
+  <table class="t">
+    <tr><th style="width:42mm">场景</th><th style="width:22mm">对外响应</th><th>理由</th></tr>
+    <tr><td>检索到他班材料（关键字 / 向量 / 混合）</td><td><code>200</code> ＋ 空 <code>hits</code></td><td>不得用 403 / 404 暗示「这份资料属于别的班级」</td></tr>
+    <tr><td>按 id 读取他班切片</td><td><code>404</code>（与不存在<strong>同形同体</strong>）</td><td>两种情形响应完全一致，不构成存在性泄露</td></tr>
+    <tr><td>来源已过期</td><td><code>409</code> <code>source_stale</code></td><td>明确失败，且<strong>不返回正文</strong></td></tr>
+    <tr><td>未登录</td><td><code>401</code></td><td>鉴权失败先于授权判断</td></tr>
+  </table>
+
+  <div class="box">
+    <span class="lbl">为什么不用 403</span>
+    <p>403 是一个<strong>信息量过大</strong>的响应：它等于告诉调用方「这个资源存在，只是不给你」。在班级隔离场景下，这会变成一个存在性探测接口。统一表现为「查不到」，攻击者无法区分「不存在」与「不属于我」。</p>
+  </div>
+
+  <h3>3.8 会话令牌与 Bearer Token 的取舍</h3>
+  <p>两种方案都能承载身份，差别主要在凭据的<strong>存放位置</strong>与<strong>校验位置</strong>。本项目按规约选了前者，这里把差异列清楚，便于对照理解。</p>
+
+  <table class="t">
+    <tr><th style="width:26mm">维度</th><th>服务端会话（本项目采用）</th><th>Bearer Token</th></tr>
+    <tr><td>凭据形态</td><td>签名令牌，放在 <code>HttpOnly</code> Cookie 中</td><td>不透明串或自包含令牌，放在请求头</td></tr>
+    <tr><td>JS 可读性</td><td><strong>不可读</strong>，XSS 无法直接窃取</td><td>通常存在 JS 可读的存储中，XSS 可窃取</td></tr>
+    <tr><td>浏览器自动携带</td><td>是，无需前端代码参与</td><td>否，需前端显式设置请求头</td></tr>
+    <tr><td>登出即失效</td><td>是（清空会话 ＋ 废弃 Cookie）</td><td>需配套吊销机制才成立</td></tr>
+    <tr><td>CSRF 面</td><td>存在，已用 <code>SameSite=Lax</code> 缓解</td><td>较小（不自动携带）</td></tr>
+    <tr><td>适用场景</td><td>同源 Web 应用</td><td>跨端 / 第三方 API 调用</td></tr>
+  </table>
+
+  <p>结论：本项目是<strong>同源浏览器应用</strong>，且规约要求凭据不下发到 JS 可读位置。会话 Cookie 在这两个前提下更贴合，也让「登出立即失效」天然成立。需要强调的是——<strong>会话令牌本身就是一种 token</strong>，只是它的存放与传输方式不同；所谓「不使用 Bearer Token」，指的是不使用客户端自行持有并手动附加的头式凭据。</p>
+
+  <h3>3.9 安全核对清单</h3>
+  <table class="t">
+    <tr><th style="width:8mm">#</th><th style="width:48mm">检查项</th><th style="width:18mm">状态</th><th>说明</th></tr>
+    <tr><td>1</td><td>口令不落明文</td><td><span class="tag ok">已满足</span></td><td>数据库仅存 bcrypt 哈希</td></tr>
+    <tr><td>2</td><td>签名密钥不写死</td><td><span class="tag ok">已满足</span></td><td>仅从环境变量读取，缺失即启动失败</td></tr>
+    <tr><td>3</td><td>密钥长度下限</td><td><span class="tag ok">已满足</span></td><td>短于 16 字符拒绝启动</td></tr>
+    <tr><td>4</td><td>令牌 JS 不可读</td><td><span class="tag ok">已满足</span></td><td><code>HttpOnly</code></td></tr>
+    <tr><td>5</td><td>跨站不自动携带</td><td><span class="tag ok">已满足</span></td><td><code>SameSite=Lax</code></td></tr>
+    <tr><td>6</td><td>失败响应同形</td><td><span class="tag ok">已满足</span></td><td>避免账号枚举</td></tr>
+    <tr><td>7</td><td>班级不可由客户端声明</td><td><span class="tag ok">已满足</span></td><td>唯一授权来源为会话</td></tr>
+    <tr><td>8</td><td>跨班不泄露存在性</td><td><span class="tag ok">已满足</span></td><td>200 空结果 / 404 同形</td></tr>
+    <tr><td>9</td><td>网关与向量库密钥不下发</td><td><span class="tag ok">已满足</span></td><td>仅在服务端环境变量中；配置视图经 <code>redacted()</code> 过滤</td></tr>
+    <tr><td>10</td><td>Cookie 仅在 HTTPS 上发送</td><td><span class="tag no">待加固</span></td><td>未配置 <code>SESSION_COOKIE_SECURE</code>；生产环境应置为 True</td></tr>
+    <tr><td>11</td><td>会话有效期策略</td><td><span class="tag no">待加固</span></td><td>未显式配置 <code>PERMANENT_SESSION_LIFETIME</code>，如需服务端可控过期须补齐</td></tr>
+  </table>
+  <p class="footnote">第 10、11 项是「部署侧加固项」而非实现缺陷：本地与容器内均以 HTTP 运行，开启 <code>Secure</code> 会导致 Cookie 无法下发。它们已如实登记，避免被误读为「已经做过」。</p>
+</section>
+
+<!-- ============================ 4 ============================ -->
+<section class="chapter">
+  <h2><span class="num">4</span>知识库问答实现方案</h2>
+  <p class="lead-in">问答能力可以理解为一条「入库」和一条「取用」的流水线：入库决定资料以什么粒度被记住，取用决定一次提问能拿到哪些证据、以及拿不到证据时怎么办。</p>
+
+  <h3>4.1 总体原则：先检索，后生成</h3>
+  <div class="box">
+    <span class="lbl">核心纪律</span>
+    <p>回答必须<strong>由本班资料支撑</strong>。因此流程被固定为「先检索证据 → 再交给生成模型」，并且当检索拿不到任何证据时，<strong>生成模型根本不会被调用</strong>——绝不让模型凭参数记忆「猜」一个答案。</p>
+  </div>
+  <p>这条纪律决定了两个可见的行为：</p>
+  <ul>
+    <li>无命中时接口仍返回 <strong>HTTP 200</strong>，<code>status</code> 为 <code>no_evidence</code>，<code>answer</code> 为固定文案「资料中未找到相关内容」，<code>citations</code> 为空数组。</li>
+    <li>无命中<strong>不是</strong> 404 或 403——「没找到证据」与「资源不存在」是两种不同的语义，必须可区分。</li>
+  </ul>
+
+  <h3>4.2 资料入库与索引流水线</h3>
+  <figure>
+    <div class="lane">
+      <div class="cap">入库</div>
+      <div class="flow">
+        <div class="node plain">上传材料<span class="sub">txt / md</span></div>
+        <span class="arrow">→</span>
+        <div class="node">预处理与切分<span class="sub">NFC · 偏移坐标</span></div>
+        <span class="arrow">→</span>
+        <div class="node">切片写入关系库<span class="sub">knowledge_chunks</span></div>
+        <span class="arrow">→</span>
+        <div class="node accent">批量嵌入<span class="sub">≤ 64 条 / 次</span></div>
+        <span class="arrow">→</span>
+        <div class="node accent">写向量 → Qdrant<span class="sub">payload 不含正文</span></div>
+      </div>
+    </div>
+    <div class="flow" style="margin:0 0 4px 0">
+      <div class="band" style="flex:0 0 41%">同一个数据库事务内提交</div>
+      <div class="band ok" style="flex:0 0 55%">提交之后执行；失败不回滚正文</div>
+    </div>
+    <div class="lane">
+      <div class="cap">取用</div>
+      <div class="flow">
+        <div class="node plain">POST /api/ask</div>
+        <span class="arrow">→</span>
+        <div class="node">hybrid 检索本班前 4 条<span class="sub">class_id 来自会话</span></div>
+        <span class="arrow">→</span>
+        <div class="node dark">有命中？<span class="sub">否则直接返回固定文案</span></div>
+        <span class="arrow">→</span>
+        <div class="node accent">组装上下文 → 调对话网关<span class="sub">system 提示由服务端写入</span></div>
+      </div>
+    </div>
+    <figcaption>图 4-1　入库流水线（上）与取用流水线（下）。两条色带标出了事务边界的分割点。</figcaption>
+  </figure>
+
+  <h3>4.3 切分策略与坐标系统</h3>
+  <p>切片是检索的最小单元，切得好不好直接决定能不能被命中。策略常量集中在 <code>app/chunking.py</code>：</p>
+
+  <table class="t">
+    <tr><th style="width:26mm">策略</th><th style="width:34mm">默认参数</th><th>行为</th></tr>
+    <tr><td><code>auto</code>（默认）</td><td>上限 800 字，重叠 10%</td><td>按「段落 → 行 → 句」的优先级寻找断开点，尽量不切断语义</td></tr>
+    <tr><td><code>custom</code></td><td>上限 100–2000 字，重叠 0–50%</td><td>由调用方指定长度与重叠比例，越界即拒绝</td></tr>
+    <tr><td><code>hierarchy</code></td><td>继承长度上限</td><td>先按标题分章，章内再按长度切分，切片会带上 <code>section</code></td></tr>
+  </table>
+
+  <table class="t">
+    <tr><th style="width:52mm">常量</th><th style="width:22mm">值</th><th>含义</th></tr>
+    <tr><td><code>DEFAULT_MAX_CHARS</code></td><td>800</td><td><code>auto</code> 的单片长度上限</td></tr>
+    <tr><td><code>DEFAULT_OVERLAP_PERCENT</code></td><td>10</td><td>相邻切片的重叠比例，避免答案正好落在切口上</td></tr>
+    <tr><td><code>MIN_MAX_CHARS</code> / <code>MAX_MAX_CHARS</code></td><td>100 / 2000</td><td><code>custom</code> 的长度合法区间</td></tr>
+    <tr><td><code>MIN_OVERLAP_PERCENT</code> / <code>MAX_OVERLAP_PERCENT</code></td><td>0 / 50</td><td>重叠比例的合法区间</td></tr>
+    <tr><td><code>MIN_MERGE_CHARS</code></td><td>32</td><td>过短的碎片会被并入相邻切片，避免产生无意义的极短切片</td></tr>
+    <tr><td><code>RANK_PARA</code> / <code>RANK_LINE</code> / <code>RANK_SENTENCE</code></td><td>3 / 2 / 1</td><td>断开点优先级：段落边界最优，其次行，再次句</td></tr>
+  </table>
+
+  <h4>预处理：只归一化，不改写</h4>
+  <p><code>preprocess()</code> 依次做四件事，都<strong>不改变文字内容</strong>：换行符归一（CRLF / CR → LF）、连续空白折叠、剥离链接与邮箱、Unicode <strong>NFC</strong> 归一化。NFC 保证「同一个字的不同码点写法」在比较时一致，这直接影响检索命中率。</p>
+
+  <h4>偏移坐标：一条可复核的约定</h4>
+  <p>每条切片都带 <code>start_offset</code> / <code>end_offset</code>，用于把命中精确指回原文位置。坐标系统的定义在草案别名端点的响应里显式给出，避免歧义：</p>
+  <pre><code>"coordinate_system": {
+  "unit": "unicode_code_point",      // 单位是 Unicode 码点，不是字节
+  "normalization": "NFC",            // 已做 NFC 归一化
+  "offset_base": "material_full_text",
+  "offset_basis": "preprocessed_text",   // 偏移相对「预处理后」的文本
+  "snippet_object": "knowledge_chunk.body_text"
+}</code></pre>
+  <p>区间约定为<strong>左闭右开</strong>；<code>line_start</code> / <code>line_end</code> 同样在预处理后的文本上计算，因此 CRLF 与 LF 两种换行下行号一致。</p>
+
+  <div class="box">
+    <span class="lbl">由预处理决定的一个后果</span>
+    <p>偏移是相对<strong>预处理后</strong>文本的，而不是原始上传文件。这是刻意的取舍：它让「偏移 ↔ 切片正文」自洽且可复核，代价是偏移不能直接拿去索引原始文件的第 N 个字节。规约把这条差异如实登记，而不是含糊带过。</p>
+  </div>
+
+  <h3>4.4 索引生命周期与两阶段事务</h3>
+  <p>索引不是一步完成的，它被拆成两个阶段，中间隔着一个事务提交点。这样拆的理由很实际：<strong>嵌入调用可能失败，但正文不该跟着丢失</strong>。</p>
+
+  <figure>
+    <div class="flow">
+      <div class="node plain">pending</div>
+      <span class="arrow">→</span>
+      <div class="node dark">indexing</div>
+      <span class="arrow">→</span>
+      <div class="node accent">indexed</div>
+      <span class="arrow">↘ 任一步失败</span>
+      <div class="node bad">failed</div>
+      <span class="arrow">⇢</span>
+      <div class="node plain">重建索引 / 回填脚本可再次进入 indexing<span class="sub">failed 不是终态，可反复重试</span></div>
+    </div>
+    <figcaption>图 4-2　索引状态机：任何向量侧失败都落到 failed，正文始终保留。</figcaption>
+  </figure>
+
+  <table class="t">
+    <tr><th style="width:22mm">状态</th><th style="width:50mm">触发时机</th><th>可检索性</th></tr>
+    <tr><td><code>pending</code></td><td>材料已入库但尚未开始索引</td><td>取决于切片是否已写入</td></tr>
+    <tr><td><code>indexing</code></td><td>切片已写入、向量尚未确认</td><td>关键字可用</td></tr>
+    <tr><td><code>indexed</code></td><td>向量写入成功</td><td>三种模式全部可用</td></tr>
+    <tr><td><code>failed</code></td><td>嵌入或写向量失败</td><td><strong>正文与切片保留，关键字仍可命中</strong>；向量侧不可用</td></tr>
+  </table>
+
+  <h4>两个阶段的职责切分</h4>
+  <p><code>app/indexing.py</code> 把编排拆成三个入口，区别只在「谁掌握事务边界」：</p>
+  <table class="t">
+    <tr><th style="width:40mm">函数</th><th>事务边界</th><th style="width:34mm">使用者</th></tr>
+    <tr><td><code>store_chunks()</code></td><td>不提交、不回滚，事务属于调用方</td><td>上传路径</td></tr>
+    <tr><td><code>index_vectors()</code></td><td>提交之后执行，各自短事务</td><td>上传路径（第二阶段）</td></tr>
+    <tr><td><code>index_material()</code></td><td>自带完整事务（两阶段串起来）</td><td>重建索引、回填脚本</td></tr>
+  </table>
+
+  <p>由此得到三条明确的失败语义：</p>
+  <ul>
+    <li><strong>切分或写库失败</strong> → 抛异常，整个事务回滚，<strong>不留下任何脏数据</strong>（材料、知识条目、切片同生共死）。</li>
+    <li><strong>嵌入失败</strong> → 材料与切片保留，状态置 <code>failed</code>，<strong>不写入不完整的向量</strong>，正文仍可被关键字命中。</li>
+    <li><strong>空正文</strong> → 没有切片可嵌入，直接置 <code>indexed</code>，<strong>不调用嵌入网关</strong>。</li>
+  </ul>
+
+  <h4>幂等性如何保证</h4>
+  <p>回填脚本可以反复运行而不产生重复数据，靠的是 <code>needs_index()</code> 这个判据：没有切片、或切片记录的 <code>source_sha256</code> 与当前正文哈希不一致时才需要索引。</p>
+  <pre><code>def needs_index(chunk_rows, source_sha256: str | None) -&gt; bool:
+    rows = list(chunk_rows or [])
+    if not rows:
+        return True
+    return bool(source_sha256) and rows[0]["source_sha256"] != source_sha256</code></pre>
+  <p>重复执行时既不重复切片，也不重复嵌入——这一点在验收中有直接证据（第二次运行 <code>chunks_written=0、embedded=0、skipped=4</code>）。</p>
+
+  <h3>4.5 三模式检索</h3>
+  <p>检索层位于 <code>app/retrieval.py</code>，对外暴露三种模式。它们的差别不只是「算法不同」，更在于<strong>是否触碰外部依赖</strong>——这直接决定了降级时的行为。</p>
+
+  <table class="t">
+    <tr><th style="width:18mm">模式</th><th style="width:38mm">数据来源</th><th>是否调用嵌入网关 / 向量库</th><th style="width:42mm">降级行为</th></tr>
+    <tr><td><code>keyword</code></td><td>SQLite 切片表字面匹配</td><td><strong>都不调用</strong></td><td>不受外部依赖影响，始终可用</td></tr>
+    <tr><td><code>vector</code></td><td>嵌入 ＋ Qdrant 余弦相似度</td><td>两者都调用</td><td>不可用时返回 503，<strong>不伪造相似度</strong></td></tr>
+    <tr><td><code>hybrid</code></td><td>两路融合（RRF）</td><td>两者都调用</td><td>同上；问答默认使用此模式</td></tr>
+  </table>
+
+  <h4>关键字路径：为什么用 <code>instr()</code> 而不是全文索引</h4>
+  <p>课件给出的参考实现基于 MySQL 的 <code>FULLTEXT … WITH PARSER ngram</code>（token 长度 2）。本项目使用 SQLite，没有等价的分词器，因此改用 <code>instr()</code> 做字面子串匹配。等价性论证如下：</p>
+  <ul>
+    <li>二元 ngram 检索的本质，是判断文本是否包含查询的连续子串；<code>instr()</code> 在语义上覆盖了同一个目标，中文连续子串可直接命中，无需分词。</li>
+    <li><code>lower()</code> 只对 ASCII 生效，因此「ASCII 大小写不敏感、中文不受影响」正好是想要的语义。</li>
+    <li><code>instr()</code> 把 <code>%</code>、<code>_</code> 当普通字符（不同于 <code>LIKE</code>），查询也<strong>不会被当作正则求值</strong>——少了一整类注入与转义问题。</li>
+  </ul>
+  <div class="box warn">
+    <span class="lbl">如实记录的差异</span>
+    <p>单字符查询在 ngram 方案下通常因 token 长度下限而不被索引，在 <code>instr()</code> 下则可以命中。这是本实现的<strong>能力超出</strong>而非缺失，已在规约中登记，而不是假装两者完全一致。</p>
+  </div>
+
+  <h4>向量路径：四道关</h4>
+  <ol>
+    <li><strong>嵌入</strong>：把查询文本送入嵌入网关，得到查询向量。</li>
+    <li><strong>带班级的向量检索</strong>：下发 <code>class_id</code> pre-filter，同时带 <code>score_threshold=0.35</code>。</li>
+    <li><strong>回表复检</strong>：用切片 id 回关系库取正文，<strong>再带一次 <code>class_id</code></strong>，取不到就丢弃。</li>
+    <li><strong>本地阈值再判</strong>：低于 0.35 的候选在本地再过滤一次。</li>
+  </ol>
+
+  <h4>输入校验</h4>
+  <p>检索参数由 <code>validate_query()</code> 统一校验，原则是<strong>不静默改写、不静默截断</strong>：</p>
+  <table class="t">
+    <tr><th style="width:28mm">参数</th><th style="width:44mm">约束</th><th>越界行为</th></tr>
+    <tr><td><code>q</code></td><td>非空、≤ 300 码点、不含控制字符</td><td>400 <code>invalid_query</code></td></tr>
+    <tr><td><code>limit</code></td><td>1 – 20（默认 10）</td><td>400</td></tr>
+    <tr><td><code>offset</code></td><td>0 – 1000（默认 0）</td><td>400</td></tr>
+    <tr><td><code>mode</code></td><td><code>keyword</code> / <code>vector</code> / <code>hybrid</code></td><td>400</td></tr>
+  </table>
+  <p>注意布尔值会被显式拒绝（<code>limit=true</code> 不因 Python 里 <code>True == 1</code> 而被接受），这是「不静默」原则的一个细节。</p>
+
+  <h3>4.6 融合公式与阈值</h3>
+  <h4>RRF 融合（k = 60）</h4>
+  <p>混合模式不用「分数相加」，而是按名次融合。原因是关键字命中次数与余弦相似度<strong>量纲不同</strong>，直接相加会让某一路主导结果。RRF 只看名次：</p>
+  <pre><code>score_final = 1 / (60 + rank_keyword) + 1 / (60 + rank_vector)
+
+# 缺席的一路不贡献任何分数（不是按 0 分参与相加）</code></pre>
+
+  <p>举一个具体例子，三个候选切片的融合结果：</p>
+  <table class="t">
+    <tr><th style="width:18mm">切片</th><th style="width:24mm">关键字名次</th><th style="width:24mm">向量名次</th><th style="width:50mm">融合分计算</th><th>结果</th></tr>
+    <tr><td>A</td><td>1</td><td>3</td><td>1/61 ＋ 1/63 = 0.016393 ＋ 0.015873</td><td><strong>0.032266</strong>（最高）</td></tr>
+    <tr><td>B</td><td>2</td><td>—</td><td>1/62</td><td>0.016129</td></tr>
+    <tr><td>C</td><td>—</td><td>1</td><td>1/61</td><td>0.016393</td></tr>
+  </table>
+  <p>可见<strong>两路都能命中的切片明显占优</strong>，而单路命中的两个候选仍能进入结果——这正是混合检索想要的：既奖励「两条证据线都指向它」，又不丢掉只被一路发现的内容。</p>
+
+  <h4>阈值：0.35</h4>
+  <p>向量相似度低于 <code>0.35</code> 的候选被丢弃，界值本身<strong>保留</strong>（即 <code>score &lt; 0.35</code> 才丢）。规则明确到可以写出边界用例：</p>
+  <table class="t">
+    <tr><th style="width:34mm">余弦相似度</th><th style="width:24mm">是否保留</th><th>说明</th></tr>
+    <tr><td>0.3499</td><td>丢弃</td><td>严格低于阈值</td></tr>
+    <tr><td>0.35</td><td><strong>保留</strong></td><td>界值包含在内</td></tr>
+    <tr><td>0.9</td><td>保留</td><td>——</td></tr>
+  </table>
+
+  <h4>排序稳定性</h4>
+  <p>排序键为 <code>(-score_final, material_id, chunk_index)</code>。当融合分相同时，用材料 id 与切片序号兜底，保证<strong>同一查询反复执行得到完全相同的顺序</strong>——这对可复核性与分页一致性都是必要的。</p>
+
+  <h3>4.7 向量库集成要点</h3>
+  <p><code>app/vector_store.py</code> 封装了 Qdrant 的一个最小子集。有三处刻意的设计：</p>
+  <table class="t">
+    <tr><th style="width:38mm">要点</th><th>实现</th></tr>
+    <tr><td>点 id 与业务 id 对齐</td><td>Qdrant 点 id 直接使用 <code>knowledge_chunks.id</code>，不需要额外的映射表</td></tr>
+    <tr><td>payload <strong>只含标识</strong></td><td>仅 <code>chunk_id</code> / <code>material_id</code> / <code>class_id</code> / <code>chunk_index</code> / <code>chunk_sha256</code>，<strong>不含正文</strong></td></tr>
+    <tr><td>写入前置断言</td><td><code>upsert()</code> 检测到 payload 含 <code>body_text</code> 或缺 <code>class_id</code> 时直接抛错</td></tr>
+    <tr><td>检索必带 pre-filter</td><td><code>search()</code> 强制构造 <code>class_id</code> 过滤条件，调用方无法绕过</td></tr>
+  </table>
+
+  <div class="box">
+    <span class="lbl">为什么不把正文存进向量库</span>
+    <p>两个理由。其一，<strong>单一数据源</strong>：正文只在关系库里存在一份，避免两处不一致；向量库只负责「谁的向量最接近」。其二，<strong>权限边界更简单</strong>：即使向量库被绕过，能拿到的也只是几个整数标识，拿不到任何材料内容。</p>
+  </div>
+
+  <p>集合约定为 <code>campusclaw_chunks</code>，距离度量为 <strong>Cosine</strong>，<code>size</code> 等于 <code>EMBEDDING_DIM</code>。集合创建是幂等的，并且在删除旧向量<strong>之前</strong>会先确保集合存在，使「全新部署未手工初始化」的场景也能自愈。</p>
+
+  <h3>4.8 课程网关适配层</h3>
+  <p><code>app/gateway.py</code> 只做一件事：把领域调用翻译成 HTTP 请求，并把失败翻译回领域异常。</p>
+
+  <table class="t">
+    <tr><th style="width:24mm">能力</th><th style="width:56mm">请求形状</th><th>约束</th></tr>
+    <tr><td>嵌入</td><td><code>POST {base}/embeddings</code>，正文<strong>只含</strong> <code>model</code> 与 <code>input</code></td><td>按 ≤ 64 条分批；返回条数必须与输入一致</td></tr>
+    <tr><td>对话</td><td><code>POST {base}/chat/completions</code>，正文含 <code>model</code> / <code>messages</code> / <code>temperature</code></td><td>只取 <code>choices[0].message.content</code>；非文本即判失败</td></tr>
+  </table>
+
+  <h4>维度守卫</h4>
+  <p>嵌入返回的向量长度必须等于 <code>EMBEDDING_DIM</code>，否则抛 <code>EmbeddingDimMismatch</code>，调用方据此把切片置 <code>failed</code> 且<strong>不写入向量</strong>。这条检查挡掉的是最隐蔽的一类故障：维度不匹配的向量能被存进去，但检索结果的相似度会完全失去意义。</p>
+
+  <h4>密钥边界</h4>
+  <p>密钥只从环境变量读取，通过请求头的 <code>Authorization: Bearer &lt;key&gt;</code> 发给网关——注意这是<strong>服务端发往网关</strong>的头，与浏览器的登录方式是两件事。对外暴露的配置视图统一经过 <code>redacted()</code> 过滤：</p>
+  <pre><code>def redacted(self) -&gt; dict:
+    """可安全输出的配置视图（**不含密钥**）。"""
+    return {"embedding_base_url": …, "embedding_model": …, "embedding_dim": …,
+            "embedding_ready": …, "chat_model": …, "chat_ready": …}</code></pre>
+  <p>据此可以对外报告「嵌入 / 对话是否就绪」，而不泄露任何密钥。</p>
+
+  <h3>4.9 问答生成：上下文与提示</h3>
+  <p>问答编排在 <code>app/qa.py</code>。它负责把「检索结果」变成「一次模型调用」，并且在这之间不做任何自由发挥。</p>
+
+  <h4>消息序列</h4>
+  <p>发给对话网关的消息序列<strong>完全由服务端构造</strong>，顺序固定：</p>
+  <table class="t">
+    <tr><th style="width:16mm">序号</th><th style="width:28mm">角色</th><th>内容</th></tr>
+    <tr><td>1</td><td><code>system</code></td><td>服务端写死的答题纪律提示</td></tr>
+    <tr><td>2</td><td><code>system</code></td><td>证据块：本班命中的切片，带编号</td></tr>
+    <tr><td>3…n</td><td><code>user</code> / <code>assistant</code></td><td>客户端提供的多轮历史（已清洗）</td></tr>
+    <tr><td>末</td><td><code>user</code></td><td>用户最新一句提问</td></tr>
+  </table>
+
+  <p>第 1 条提示的原文如下，它对模型的约束是「只许依据编号资料作答」：</p>
+  <pre><code>你是班级知识库助手。**只允许依据下面带编号的资料作答**，
+不得依据你自己的记忆、常识或猜测补充任何事实。
+若资料不足以回答，直接回答「资料中未找到相关内容」。
+回答必须简短，并在引用处标注编号，格式为 [1]、[2]，编号与资料序号一一对应。</code></pre>
+
+  <p>第 2 条证据块的格式由 <code>_context_block()</code> 生成，<strong>只含材料标题、切片序号与切片正文</strong>：</p>
+  <pre><code>以下是本班知识库中检索到的资料，编号即引用编号：
+
+[1] 材料《记叙文阅读方法》第 3 段：
+…（切片正文）…
+
+[2] 材料《记叙文阅读方法》第 4 段：
+…（切片正文）…</code></pre>
+
+  <div class="box">
+    <span class="lbl">上下文里刻意不放的东西</span>
+    <p>不含向量分量、不含 Qdrant 原始点数据、不含其他班级的切片。前两者的排除让「密钥与相似度不进入会话内容」，后者是班级隔离在问答链路上的延伸。</p>
+  </div>
+
+  <h4>历史消息的处理</h4>
+  <table class="t">
+    <tr><th style="width:36mm">规则</th><th>实现</th></tr>
+    <tr><td>丢弃客户端 <code>system</code> 消息</td><td>只保留 <code>user</code> / <code>assistant</code>；丢弃时记一条 warning。<strong>system 提示无法被客户端替换或追加</strong></td></tr>
+    <tr><td>长度上限</td><td>只保留最近 20 轮，避免上下文无限膨胀</td></tr>
+    <tr><td>检索只用最新一句</td><td>检索仅以 <code>q</code> 发起；历史只附在对话上下文之后，<strong>不参与检索</strong></td></tr>
+    <tr><td>证据条数</td><td>最多 4 条（<code>TOP_K_CONTEXT = 4</code>）</td></tr>
+  </table>
+
+  <h3>4.10 无命中纪律</h3>
+  <div class="box">
+    <span class="lbl">本变更最核心的一条</span>
+    <p>当检索结果为空时，<code>answer()</code> <strong>直接返回</strong>，不做任何模型调用。代码里的意图注释写得很直接：</p>
+    <pre><code>if not hits:
+    # 刻意不调用对话网关：让模型凭参数记忆勉强作答正是课件否决的做法
+    log.info("问答无命中，未调用对话网关（class_id=%s）", class_id)
+    return payload</code></pre>
+  </div>
+
+  <p>对应的响应如下，注意<strong>状态与文案同时给出</strong>，且 HTTP 状态是 200：</p>
+  <pre><code>HTTP 200
+{
+  "answer": "资料中未找到相关内容",
+  "status": "no_evidence",
+  "message": "资料中未找到相关内容",
+  "citations": [],
+  "question": "…",
+  "degraded": false,
+  "index_warnings": []
+}</code></pre>
+
+  <p>验收对此的判据不是「页面上出现了这句话」——因为页面出现文字并不等于模型被调用过——而是<strong>直接断言对话网关的调用次数为 0</strong>。</p>
+
+  <h3>4.11 引用一致性与溯源</h3>
+  <p>回答里的引用编号与 citation 列表必须严格对应，否则「可溯源」就是一句空话。</p>
+
+  <table class="t">
+    <tr><th style="width:36mm">环节</th><th>规则</th></tr>
+    <tr><td>编号来源</td><td>组装证据块时按顺序编号 <code>[1]</code>、<code>[2]</code>…，编号即切片在上下文中的位置</td></tr>
+    <tr><td>列表顺序</td><td><code>citations[i]</code> 对应 <code>[i+1]</code>，与实际传给模型的切片顺序一致</td></tr>
+    <tr><td>字段完整性</td><td>每条 citation 含 <code>chunk_id</code> / <code>material_title</code> / <code>chunk_index</code> / <code>start_offset</code> / <code>end_offset</code> / <code>snippet</code></td></tr>
+    <tr><td>越界引用</td><td>超出实际切片数的编号<strong>不进 citations</strong>，服务端记 warning，也不返回他班或不存在的引用</td></tr>
+    <tr><td>回溯验证</td><td>用 <code>chunk_id</code> 访问来源端点，可拿回同一条切片正文</td></tr>
+  </table>
+
+  <p>引用解析由一条正则完成，返回「合法编号」与「越界编号」两组，都去重并升序：</p>
+  <pre><code>_CITATION_RE = re.compile(r"\[(\d{1,3})\]")</code></pre>
+
+  <h4>来源读取：重新鉴权 ＋ 版本核对</h4>
+  <p>从引用跳回去读原文时，端点是<strong>独立重新鉴权</strong>的，不依赖前端此前拿到的任何结果：</p>
+  <ul>
+    <li>按 <code>(chunk_id, class_id)</code> 双条件查询；跨班与不存在返回<strong>同形同体</strong>的 404。</li>
+    <li>比对切片记录的 <code>source_sha256</code> 与所属材料当前的 <code>source_sha256</code>；不一致说明材料已被重建索引，返回 <strong>409 <code>source_stale</code></strong> 且<strong>不返回正文</strong>，提示「请重新检索」。</li>
+    <li>会话失效则 401。</li>
+  </ul>
+
+  <h3>4.12 降级与错误码矩阵</h3>
+  <p>这套错误码的设计目标是：<strong>每一种失败都明确、可区分，且绝不退化成伪造结果</strong>。</p>
+  <table class="t">
+    <tr><th style="width:18mm">状态码</th><th style="width:46mm">错误码</th><th style="width:42mm">触发条件</th><th>系统行为</th></tr>
+    <tr><td>400</td><td><code>invalid_query</code></td><td>查询为空 / 超长 / 含控制字符 / 参数越界</td><td>明确拒绝，不静默截断</td></tr>
+    <tr><td>401</td><td><code>unauthorized</code></td><td>未登录或会话失效</td><td>前端清理状态并回到登录页</td></tr>
+    <tr><td>403</td><td>角色不符</td><td>非教师调用上传 / 重建索引</td><td>附 <code>required_role</code> 与 <code>your_role</code></td></tr>
+    <tr><td>404</td><td><code>not_found</code></td><td>来源不存在，或<strong>属于其他班级</strong></td><td>两种情形同形同体</td></tr>
+    <tr><td>409</td><td><code>source_stale</code></td><td>引用来源已被重建索引</td><td>不返回正文，提示重新检索</td></tr>
+    <tr><td>502</td><td><code>upstream_error</code></td><td>对话网关超时或报错</td><td>失败外抛，<strong>不返回本地拼凑的答案</strong></td></tr>
+    <tr><td>503</td><td><code>embedding_unavailable</code></td><td>嵌入网关未配置或不可用</td><td>向量相关模式失败；<code>keyword</code> 不受影响</td></tr>
+    <tr><td>503</td><td><code>vector_store_unavailable</code></td><td>向量库未配置或不可达</td><td>同上，<strong>不伪造相似度分数</strong></td></tr>
+  </table>
+
+  <div class="box quote">
+    <span class="lbl">降级不等于糊弄</span>
+    <p>降级的正确形态是「<strong>清晰地少做一件事</strong>」，而不是「用本地规则假装做到了」。嵌入不可用时，系统宁可返回 503 说「这条路走不通」，也不会用随机数或字面重合度冒充相似度——因为后者会产出一个看起来正常、实际上不可信的结果。</p>
+  </div>
+</section>
+
+<!-- ============================ 5 ============================ -->
+<section class="chapter">
+  <h2><span class="num">5</span>接口契约总表</h2>
+  <p>下表汇总全部端点。除标注「免登录」者外，其余均需有效会话。</p>
+
+  <table class="t">
+    <tr><th style="width:14mm">方法</th><th style="width:52mm">路径</th><th style="width:22mm">鉴权</th><th>说明</th></tr>
+    <tr><td><code>GET</code></td><td><code>/health</code></td><td>免登录</td><td>探活；可选检测 SQLite 可读性，失败返回 503</td></tr>
+    <tr><td><code>GET</code></td><td><code>/</code></td><td>免登录</td><td>首页；已登录与未登录展示不同内容</td></tr>
+    <tr><td><code>GET</code></td><td><code>/login</code></td><td>免登录</td><td>登录页</td></tr>
+    <tr><td><code>POST</code></td><td><code>/login</code></td><td>免登录</td><td>表单登录；成功 302</td></tr>
+    <tr><td><code>GET</code> / <code>POST</code></td><td><code>/logout</code></td><td>免登录</td><td>页面登出</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/login</code></td><td>免登录</td><td>JSON 登录；成功下发会话 Cookie，失败同形 401</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/logout</code></td><td>免登录</td><td>幂等登出</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/me</code></td><td>需登录</td><td>会话画像</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/materials</code></td><td>需登录</td><td>材料列表；支持 <code>page</code> / <code>page_size</code> / <code>title</code> 过滤</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/materials/&lt;id&gt;</code></td><td>需登录</td><td>材料详情；含索引状态、切片数、策略等</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/materials/&lt;id&gt;/download</code></td><td>需登录</td><td>下载原始文件</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/materials/upload</code></td><td>教师</td><td>上传并即时索引；返回切片摘要与索引状态</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/materials/&lt;id&gt;/reindex</code></td><td>教师</td><td>重建索引：先删旧向量再写入</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/materials/&lt;id&gt;/vectors</code></td><td>需登录</td><td>关系库切片 ↔ 向量库记录对照；<strong>不回传向量分量</strong></td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/search</code></td><td>需登录</td><td>三模式检索；<code>mode</code> 默认 <code>hybrid</code></td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/ask</code></td><td>需登录</td><td>知识库问答；先检索后生成</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/knowledge/sources/&lt;chunk_id&gt;</code></td><td>需登录</td><td>来源读取；独立重新鉴权 ＋ 版本核对</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/knowledge/search</code></td><td>需登录</td><td>草案期别名端点，保留旧字段名</td></tr>
+    <tr><td><code>GET</code></td><td><code>/search</code></td><td>需登录</td><td>检索与问答页面</td></tr>
+  </table>
+
+  <h4><code>POST /api/search</code> 成功响应要点</h4>
+  <pre><code>{
+  "query": …, "mode": "hybrid",
+  "hits": [ { "chunk_id": …, "material_id": …, "material_title": …,
+              "chunk_index": …, "start_offset": …, "end_offset": …,
+              "snippet": …, "score_keyword": …, "score_vector": …,
+              "rank_keyword": …, "rank_vector": …, "score_final": … } ],
+  "total_matched": …, "returned": …, "status": "ok",
+  "degraded": …, "index_warnings": [ … ], "class_id": …, "role": …
+}</code></pre>
+  <p><code>query_vector</code> 字段在服务端结构里存在，但<strong>不进入页面 DOM</strong>；页面只渲染文本类字段。</p>
+
+  <h4><code>POST /api/ask</code> 成功响应要点</h4>
+  <pre><code>{
+  "answer": "…带有 [1] [2] 标注的简短回答…",
+  "status": "ok",
+  "citations": [ { "chunk_id": …, "material_title": …, "chunk_index": …,
+                   "start_offset": …, "end_offset": …, "snippet": … } ],
+  "referenced": [1, 2], "out_of_range_refs": [],
+  "question": …, "degraded": …, "index_warnings": [ … ],
+  "class_id": …, "role": …, "top_k": 4
+}</code></pre>
+</section>
+
+<!-- ============================ 6 ============================ -->
+<section class="chapter">
+  <h2><span class="num">6</span>验证与证据</h2>
+  <p class="lead-in">本章给出复核方式与结论，并明确边界——哪些结论是真实环境验证的，哪些是等价替身验证的。</p>
+
+  <h3>6.1 测试矩阵</h3>
+  <table class="t">
+    <tr><th style="width:52mm">测试文件</th><th style="width:20mm">层次</th><th>覆盖内容</th></tr>
+    <tr><td><code>tests/test_chunking.py</code></td><td>单元</td><td>预处理、三种切分策略、偏移与行号、边界、确定性</td></tr>
+    <tr><td><code>tests/test_retrieval.py</code></td><td>单元</td><td>网关配置与请求形状、维度守卫、向量 payload、pre-filter、阈值、RRF 公式、输入校验、排序稳定、坐标系统</td></tr>
+    <tr><td><code>tests/test_qa.py</code></td><td>单元</td><td>上下文组装、system 提示不可替换、只取最新一句、引用顺序、网关失败不外抛伪造答案</td></tr>
+    <tr><td><code>tests/test_search_page.py</code></td><td>单元</td><td>页面转义、会话失效清理、三态文案、过期提示、向量不入页面、禁用凭据存储</td></tr>
+    <tr><td><code>tests/http_retrieval_acceptance.py</code></td><td>真实 HTTP</td><td>本变更全部 Scenario 的正向与反向判据</td></tr>
+    <tr><td><code>tests/test_acceptance.py</code></td><td>场景</td><td>既有能力的回归</td></tr>
+    <tr><td><code>tests/http_acceptance.py</code></td><td>真实 HTTP</td><td>既有能力的真实 HTTP 回归</td></tr>
+    <tr><td><code>scripts/validate_spec.py</code></td><td>规约</td><td>规约结构校验与覆盖检查</td></tr>
+    <tr><td><code>scripts/check_compose.py</code></td><td>交付物</td><td>Docker 交付物静态校验</td></tr>
+  </table>
+
+  <h3>6.2 验证结果</h3>
+  <p>本次梳理对全部套件重新执行了一遍，结果如下：</p>
+  <table class="t">
+    <tr><th style="width:52mm">套件</th><th style="width:32mm">结果</th><th>说明</th></tr>
+    <tr><td><code>tests/test_chunking.py</code></td><td><strong>35 / 35 OK</strong></td><td>预处理、三种切分策略、偏移与行号、边界、确定性</td></tr>
+    <tr><td><code>tests/test_retrieval.py</code></td><td><strong>68 / 68 OK</strong></td><td>三模式、RRF、阈值、pre-filter、维度守卫、排序稳定</td></tr>
+    <tr><td><code>tests/test_qa.py</code></td><td><strong>28 / 28 OK</strong></td><td>上下文组装、system 丢弃、无命中零调用、引用顺序</td></tr>
+    <tr><td><code>tests/test_search_page.py</code></td><td><strong>30 / 30 OK</strong></td><td>转义、三态文案、会话清理、向量不入页面</td></tr>
+    <tr><td><strong>单元测试小计</strong></td><td><strong>161 / 161</strong></td><td>31 个测试类</td></tr>
+    <tr><td><code>tests/http_retrieval_acceptance.py</code></td><td><strong>236 / 236 项</strong></td><td>39 个用例，覆盖本变更全部 Scenario 的正向与反向判据</td></tr>
+    <tr><td><code>tests/test_acceptance.py</code></td><td><strong>23 / 23 OK</strong></td><td>既有能力场景级回归</td></tr>
+    <tr><td><code>tests/http_acceptance.py</code></td><td><strong>58 / 58 项</strong></td><td>既有能力真实 HTTP 回归</td></tr>
+    <tr><td><code>scripts/validate_spec.py</code>（本变更 ＋ 覆盖检查）</td><td><strong>0 error / 0 warning</strong></td><td>规约结构与任务覆盖校验</td></tr>
+    <tr><td><code>scripts/check_compose.py</code></td><td><strong>14 / 14 项</strong></td><td>Docker 交付物静态校验</td></tr>
+  </table>
+
+  <div class="box warn">
+    <span class="lbl">本轮复跑时修掉的两个脚手架缺陷</span>
+    <p>这两处都<strong>不是功能缺陷</strong>，而是 Windows 控制台编码造成的「看起来像缺陷」：</p>
+    <ul>
+      <li><code>tests/http_retrieval_acceptance.py</code> 调用 <code>backfill_index.py</code> 时，子进程按本机区域编码（GBK）写 stdout，而父进程固定按 UTF-8 解析，抛出 <code>UnicodeDecodeError</code>；读线程崩溃使返回值为空，<code>backfill-idempotent</code> 的 <strong>5 项判据被判失败</strong>——库里其实一切正常。<strong>修法</strong>：为子进程注入 <code>PYTHONIOENCODING=utf-8</code>，并把解码改为 <code>errors="replace"</code>。修复后该项恢复通过。</li>
+      <li><code>scripts/check_compose.py</code> 输出 <code>✓ / ✗</code> 时在 GBK 控制台抛 <code>UnicodeEncodeError</code>，脚本直接崩掉，表现为「校验崩溃」而非「交付物不合格」。<strong>修法</strong>：脚本启动时把 stdout 重配置为 UTF-8。</li>
+    </ul>
+    <p>两条都归到同一类问题：<strong>脚本不该让输出编码决定自己的成败</strong>。现已一同加固。</p>
+  </div>
+
+  <h3>6.3 结论边界</h3>
+  <p>以下是必须讲清楚的边界，避免把「等价验证」误读成「真实环境已验证」。</p>
+  <table class="t">
+    <tr><th style="width:40mm">项目</th><th style="width:22mm">状态</th><th>说明</th></tr>
+    <tr><td>真实 Qdrant 集群</td><td><span class="tag no">待复核</span></td><td>本机未部署 Qdrant。验收使用的是行为等价的 REST 子集替身（真算余弦、支持 pre-filter 与阈值），<strong>真实 Qdrant 上的点写入、索引与检索仍需在目标环境复核一次</strong>。</td></tr>
+    <tr><td>课程网关真实凭证</td><td><span class="tag no">待复核</span></td><td>嵌入与对话两侧使用确定性伪嵌入替身与对话替身验证流程，真实网关的返回格式与维度需以 <code>EMBEDDING_DIM</code> 实测确认。</td></tr>
+    <tr><td>Docker Compose 端到端</td><td><span class="tag no">待复核</span></td><td>本机无 Docker，交付物以静态校验通过；容器内 <code>down/up</code> 后的数据持久化与索引重建需在具备 Docker 的环境补做。</td></tr>
+    <tr><td>HTTPS 下的 Cookie 加固</td><td><span class="tag no">待加固</span></td><td>见 §3.9 第 10、11 项。</td></tr>
+    <tr><td>其余全部结论</td><td><span class="tag ok">已验证</span></td><td>单元、真实 HTTP 验收、既有能力回归、规约校验均在本机实际执行。</td></tr>
+  </table>
+
+  <div class="box">
+    <span class="lbl">替身验证的可信度来自哪里</span>
+    <p>替身不是「随便返回点东西」。伪嵌入是<strong>确定性</strong>的（同一文本恒得同一向量），向量库替身<strong>真实计算余弦相似度</strong>并真实执行 pre-filter 与阈值判定。因此被验证的是<strong>本项目的逻辑</strong>——班级前置过滤是否生效、阈值边界是否判定正确、RRF 名次是否融合正确——这些结论不会因为换成真实 Qdrant 而改变。真正需要复核的是<strong>集成细节</strong>：真实的返回结构与字段命名。</p>
+  </div>
+</section>
+
+<!-- ============================ 7 ============================ -->
+<section class="chapter">
+  <h2><span class="num">7</span>附录</h2>
+
+  <h3>7.1 环境变量</h3>
+  <table class="t">
+    <tr><th style="width:44mm">变量</th><th style="width:20mm">必要性</th><th>说明</th></tr>
+    <tr><td><code>SECRET_KEY</code></td><td><strong>必填</strong></td><td>会话签名密钥；缺失或短于 16 字符则拒绝启动</td></tr>
+    <tr><td><code>DATABASE_PATH</code></td><td>可选</td><td>SQLite 文件路径</td></tr>
+    <tr><td><code>UPLOAD_DIR</code></td><td>可选</td><td>上传目录</td></tr>
+    <tr><td><code>MAX_UPLOAD_BYTES</code></td><td>可选</td><td>上传大小上限，默认 5 MiB</td></tr>
+    <tr><td><code>EMBEDDING_BASE_URL</code></td><td>可选</td><td>嵌入接口基址；缺失则向量模式降级</td></tr>
+    <tr><td><code>EMBEDDING_API_KEY</code></td><td>可选</td><td>嵌入密钥，仅服务端</td></tr>
+    <tr><td><code>EMBEDDING_MODEL</code></td><td>可选</td><td>嵌入模型名</td></tr>
+    <tr><td><code>EMBEDDING_DIM</code></td><td>可选</td><td>向量维度，须与网关返回一致</td></tr>
+    <tr><td><code>CHAT_BASE_URL</code> / <code>CHAT_API_KEY</code> / <code>CHAT_MODEL</code></td><td>可选</td><td>对话接口；留空则复用嵌入侧的基址与密钥</td></tr>
+    <tr><td><code>QDRANT_URL</code></td><td>可选</td><td>向量库地址</td></tr>
+    <tr><td><code>QDRANT_COLLECTION</code></td><td>可选</td><td>集合名，默认 <code>campusclaw_chunks</code></td></tr>
+    <tr><td><code>QDRANT_API_KEY</code></td><td>可选</td><td>向量库密钥；自建未开鉴权时可留空</td></tr>
+  </table>
+
+  <h3>7.2 数据表结构</h3>
+  <table class="t">
+    <tr><th style="width:40mm">表</th><th style="width:22mm">班级私有</th><th>用途</th></tr>
+    <tr><td><code>classes</code></td><td>—</td><td>班级</td></tr>
+    <tr><td><code>users</code></td><td>是（<code>class_id</code>）</td><td>用户；口令仅存 bcrypt 哈希</td></tr>
+    <tr><td><code>materials</code></td><td>是</td><td>材料元信息；含 <code>index_status</code> / <code>chunk_strategy</code> / <code>source_sha256</code></td></tr>
+    <tr><td><code>knowledge_entries</code></td><td>是</td><td>知识条目；与材料同事务写入</td></tr>
+    <tr><td><code>knowledge_chunks</code></td><td>是</td><td><strong>检索核心表</strong>：切片正文、偏移、行号、哈希、索引状态</td></tr>
+    <tr><td><code>handouts</code> / <code>assignments</code> / <code>assistants</code> / <code>skills</code></td><td>是</td><td>讲义、作业、助手、技能四类结构</td></tr>
+  </table>
+  <p>索引：<code>users(class_id)</code>、<code>materials(class_id, created_at DESC)</code>、<code>knowledge_entries(class_id, material_id)</code>、<code>knowledge_chunks(class_id, material_id, chunk_index)</code>、<code>knowledge_chunks(material_id)</code>。班级条件出现在每个索引的前导列上，与「班级优先」的查询模式一致。</p>
+
+  <h3>7.3 固化常量</h3>
+  <table class="t">
+    <tr><th style="width:52mm">常量</th><th style="width:24mm">值</th><th>位置</th></tr>
+    <tr><td><code>SESSION_KEYS</code></td><td>5 个字段</td><td><code>app/auth.py</code></td></tr>
+    <tr><td><code>MIN_SECRET_KEY_LEN</code></td><td>16</td><td><code>app/__init__.py</code></td></tr>
+    <tr><td><code>RRF_K</code></td><td>60</td><td><code>app/retrieval.py</code></td></tr>
+    <tr><td><code>VECTOR_MIN_SCORE</code></td><td>0.35</td><td><code>app/retrieval.py</code></td></tr>
+    <tr><td><code>DEFAULT_LIMIT</code> / <code>MAX_LIMIT</code> / <code>MAX_OFFSET</code></td><td>10 / 20 / 1000</td><td><code>app/retrieval.py</code></td></tr>
+    <tr><td><code>MAX_QUERY_CHARS</code></td><td>300</td><td><code>app/retrieval.py</code></td></tr>
+    <tr><td><code>VECTOR_CANDIDATES</code></td><td>50</td><td><code>app/retrieval.py</code></td></tr>
+    <tr><td><code>TOP_K_CONTEXT</code></td><td>4</td><td><code>app/qa.py</code></td></tr>
+    <tr><td><code>MAX_HISTORY_TURNS</code></td><td>20</td><td><code>app/qa.py</code></td></tr>
+    <tr><td><code>BATCH_SIZE</code>（嵌入）</td><td>64</td><td><code>app/gateway.py</code></td></tr>
+    <tr><td><code>DEFAULT_MAX_CHARS</code> / <code>DEFAULT_OVERLAP_PERCENT</code></td><td>800 / 10</td><td><code>app/chunking.py</code></td></tr>
+    <tr><td><code>MIN_MERGE_CHARS</code></td><td>32</td><td><code>app/chunking.py</code></td></tr>
+    <tr><td><code>DEFAULT_COLLECTION</code></td><td><code>campusclaw_chunks</code></td><td><code>app/vector_store.py</code></td></tr>
+  </table>
+
+  <p class="footnote">本文档由仓库中的实际代码与规约整理而成，未引入仓库之外的设计。所有常量、字段名与行为描述均可按 §7.3 给出的文件位置逐条核对。</p>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} · CampusClaw</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<style>
+  .msg { border:1px solid #e3e6ea;border-radius:10px;padding:12px;background:#fff; }
+  .msg--user { background:#f7f8fa; }
+  .msg__meta { font-size:12px;color:#666;margin-bottom:6px; }
+  .msg__body { white-space:pre-wrap;font-size:14px;line-height:1.65;color:#222; }
+  .cite { font-size:12px;color:#555;margin-top:8px;border-top:1px dashed #e3e6ea;padding-top:8px; }
+  .tool { font-size:12px;padding:2px 6px;border-radius:4px;margin-right:6px; }
+  .tool--ok { background:#e8f5e9;color:#137333; }
+  .tool--denied { background:#fdecec;color:#b3261e; }
+  .tool--error { background:#fff4e5;color:#8a5300; }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+
+<main class="page">
+  <div class="page-head">
+    <h1>{{ klass }} · 对话</h1>
+    <p>会话创建时锁定应用；技能与绑定每次提问重读。回答中的 <code>[n]</code> 对应下方引用列表。</p>
+  </div>
+
+  <div id="notice" class="notice" hidden></div>
+
+  <section class="card" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+    <label>应用
+      <select id="agent" style="padding:8px;min-width:240px"></select>
+    </label>
+    <button class="btn" id="new-conv" type="button">新建会话</button>
+    <span id="conv-label" style="font-size:12px;color:#666"></span>
+  </section>
+
+  <section id="thread" style="display:grid;gap:12px;margin-bottom:16px"></section>
+
+  <section class="card" style="display:flex;gap:10px;align-items:flex-end">
+    <label style="flex:1">提问（2–500 字）
+      <textarea id="question" rows="2" maxlength="500" style="width:100%;padding:8px"
+        placeholder="例如：倒叙有什么作用？"></textarea>
+    </label>
+    <button class="btn" id="send" type="button">发送</button>
+  </section>
+</main>
+
+<script>
+(function () {
+  const notice = document.getElementById('notice');
+  const thread = document.getElementById('thread');
+  const agentSel = document.getElementById('agent');
+  const convLabel = document.getElementById('conv-label');
+  let conversationId = null;
+  let busy = false;
+
+  function show(text, bad) {
+    notice.hidden = false;
+    notice.textContent = text;
+    notice.style.background = bad ? '#fdecec' : '';
+  }
+
+  function el(tag, text, cls) {
+    const node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (cls) node.className = cls;
+    return node;
+  }
+
+  async function api(path, options) {
+    const res = await fetch(path, Object.assign({credentials: 'same-origin'}, options || {}));
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) throw new Error((data && (data.message || data.error)) || ('HTTP ' + res.status));
+    return data;
+  }
+
+  async function loadAgents() {
+    const data = await api('/api/agents');
+    agentSel.textContent = '';
+    data.agents.forEach(function (agent) {
+      const opt = el('option', agent.name + '（技能 ' + agent.skills.length + ' · 材料 ' + agent.materials.length + '）');
+      opt.value = String(agent.id);
+      agentSel.appendChild(opt);
+    });
+    const preset = new URLSearchParams(window.location.search).get('agent_id');
+    if (preset) agentSel.value = preset;
+  }
+
+  function bubble(role) {
+    const node = el('div', null, 'msg' + (role === 'user' ? ' msg--user' : ''));
+    const meta = el('div', '你' , 'msg__meta');
+    const body = el('div', '', 'msg__body');
+    node.appendChild(meta);
+    node.appendChild(body);
+    thread.appendChild(node);
+    thread.scrollTop = thread.scrollHeight;
+    return {node: node, meta: meta, body: body};
+  }
+
+  function renderMeta(target, meta) {
+    target.textContent = '';
+    target.appendChild(el('span', '助手'));
+    if (meta.skill) target.appendChild(el('span', ' · 技能：' + meta.skill));
+    if (meta.degraded) target.appendChild(el('span', ' · 检索降级'));
+    (meta.tool_calls || []).forEach(function (call) {
+      const tag = el('span', call.ref + ' → ' + call.status,
+        'tool tool--' + (call.status === 'ok' ? 'ok' : call.status === 'denied' ? 'denied' : 'error'));
+      tag.style.marginLeft = '8px';
+      target.appendChild(tag);
+    });
+  }
+
+  function renderCitations(target, citations) {
+    if (!citations || !citations.length) return;
+    const box = el('div', '', 'cite');
+    box.appendChild(el('div', '引用'));
+    citations.forEach(function (cite, index) {
+      const line = el('div', '[' + (index + 1) + '] ' + cite.material_title +
+        ' · 切片 ' + cite.chunk_index + '：' + String(cite.snippet || '').slice(0, 80));
+      box.appendChild(line);
+    });
+    target.appendChild(box);
+  }
+
+  async function ensureConversation() {
+    if (conversationId) return conversationId;
+    const created = await api('/api/conversations', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({agent_id: Number(agentSel.value)})
+    });
+    conversationId = created.id;
+    convLabel.textContent = '会话 #' + conversationId;
+    return conversationId;
+  }
+
+  async function send() {
+    if (busy) return;
+    const questionInput = document.getElementById('question');
+    const question = questionInput.value.trim();
+    if (question.length < 2) { show('提问至少 2 个字', true); return; }
+
+    busy = true;
+    document.getElementById('send').disabled = true;
+    notice.hidden = true;
+
+    const mine = bubble('user');
+    mine.meta.textContent = '你';
+    mine.body.textContent = question;
+    questionInput.value = '';
+
+    const reply = bubble('assistant');
+    reply.meta.textContent = '助手 · 正在检索…';
+
+    try {
+      const id = await ensureConversation();
+      const res = await fetch('/api/conversations/' + id + '/stream', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({q: question}),
+        credentials: 'same-origin'
+      });
+      if (!res.ok) {
+        let data = null;
+        try { data = await res.json(); } catch (e) { data = null; }
+        throw new Error((data && (data.message || data.error)) || ('HTTP ' + res.status));
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let text = '';
+      let meta = {};
+
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        buffer += decoder.decode(part.value, {stream: true});
+        let split = buffer.indexOf('\n\n');
+        while (split >= 0) {
+          const raw = buffer.slice(0, split);
+          buffer = buffer.slice(split + 2);
+          split = buffer.indexOf('\n\n');
+
+          let name = 'message';
+          const dataLines = [];
+          raw.split('\n').forEach(function (line) {
+            if (line.indexOf('event:') === 0) name = line.slice(6).trim();
+            else if (line.indexOf('data:') === 0) dataLines.push(line.slice(5).trim());
+          });
+          if (!dataLines.length) continue;
+          let payload = {};
+          try { payload = JSON.parse(dataLines.join('\n')); } catch (e) { payload = {}; }
+
+          if (name === 'meta') {
+            meta = payload;
+            renderMeta(reply.meta, meta);
+          } else if (name === 'delta') {
+            text += payload.text || '';
+            reply.body.textContent = text;      // 增量片段拼接到既有文本
+          } else if (name === 'done') {
+            renderCitations(reply.node, meta.citations || []);
+          } else if (name === 'error') {
+            show('流式失败：' + (payload.message || payload.code), true);
+          }
+        }
+      }
+    } catch (err) {
+      reply.meta.textContent = '助手';
+      reply.body.textContent = '（失败）' + err.message;
+      show(err.message, true);
+    } finally {
+      busy = false;
+      document.getElementById('send').disabled = false;
+    }
+  }
+
+  document.getElementById('send').onclick = send;
+  document.getElementById('question').addEventListener('keydown', function (event) {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) send();
+  });
+  document.getElementById('new-conv').onclick = function () {
+    conversationId = null;
+    convLabel.textContent = '';
+    thread.textContent = '';
+    show('已新建会话（下一条提问会锁定当前应用）', false);
+  };
+
+  loadAgents().catch(function (err) { show(err.message, true); });
+})();
+</script>
+</body>
+</html>

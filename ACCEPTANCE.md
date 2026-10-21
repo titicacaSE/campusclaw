@@ -6,6 +6,7 @@
 > | --- | --- | --- |
 > | §1–§5 | `add-auth-rbac-class-knowledge` | `openspec/changes/add-auth-rbac-class-knowledge/specs/auth-upload/spec.md` |
 > | §6–§10 | `add-traceable-vector-retrieval` | `openspec/changes/add-traceable-vector-retrieval/specs/traceable-vector-retrieval/spec.md` |
+> | §11–§15 | `add-agent-platform-mcp-tools` | `openspec/changes/add-agent-platform-mcp-tools/specs/agent-platform/spec.md` |
 
 ## 0. 验收环境与总览
 
@@ -14,7 +15,7 @@
 | 运行栈 | CPython 3.13 + Flask 3.1.3 + bcrypt 5.0.0 + SQLite 3（标准库 `sqlite3`） |
 | 向量库 | Qdrant（`Cosine`）；本机无 Docker，验收期使用 `scripts/qdrant_stub.py` 替身，见 §9 |
 | 部署形态 | Dockerfile + docker-compose.yml（app + qdrant）+ gunicorn（NFR-02） |
-| 验收日期 | 2026-09-23（变更一）／2026-09-30（变更二） |
+| 验收日期 | 2026-09-23（变更一）／2026-09-30（变更二）／2026-10-13（变更三） |
 | 数据基线 | `classes=2 / users=4 / materials=4 / knowledge_entries=4`（`python scripts/init_db.py --force`） |
 
 复现全部结论的命令：
@@ -34,9 +35,15 @@ python tests/test_search_page.py                 # 30 项
 python tests/http_retrieval_acceptance.py        # 真实 HTTP：236 项 / 39 个用例
 python scripts/validate_spec.py add-traceable-vector-retrieval --check-coverage
 python scripts/check_compose.py
+
+# 变更三
+python -m unittest tests.test_agent_platform              # 102 项
+python tests/http_agent_acceptance.py                     # 真实 HTTP：170 项 / A1–A30
+python scripts/validate_spec.py add-agent-platform-mcp-tools --check-coverage
+python apitest/run_all.py --base-url http://127.0.0.1:<port> --mcp-token <token>
 ```
 
-**总览：变更一 `23/23` + `58/58` + `0 error` + `14/14`；变更二 `161/161` 单元 + `236/236` HTTP + `0 error` + `14/14` 全部通过。**
+**总览：变更一 `23/23` + `58/58` + `0 error` + `14/14`；变更二 `161/161` 单元 + `236/236` HTTP + `0 error` + `14/14`；变更三 `102/102` 单元 + `170/170` HTTP（A1–A30）+ `0 error` + `14/14` 全部通过。**
 
 
 ---
@@ -340,6 +347,113 @@ python -c "from app.db import SQL_KEYWORD_SEARCH as q;assert q.index('class_id')
 ```
 
 这版断言更贴近不变量：它约束的是 SQL 本身，不随代码落在哪个文件而漂移。
+
+---
+
+# 变更三 `add-agent-platform-mcp-tools` 验收记录
+
+规约来源：`openspec/changes/add-agent-platform-mcp-tools/specs/agent-platform/spec.md`
+（16 个 Requirement / 62 个 Scenario，另有 A1–A30 验收清单）。
+
+## 11. 与既有规约的关系：一处**显式取代**
+
+`add-traceable-vector-retrieval` 的 spec 有一条硬约束：
+
+> 第 4 课 MUST 沿用服务端会话 Cookie，MUST NOT 引入客户端持有凭据的登录方案；
+> 响应体与 `localStorage` 中不得出现用于后续鉴权的 bearer token。
+
+第 5 课（T5）要求个人项目改用 **Bearer JWT**。两者正面冲突，必须显式取代而不是悄悄改掉，
+否则「按规约验收」这句话就失效了。本变更的处置：
+
+| 项 | 变更二口径 | 变更三口径（**取代**后） |
+| --- | --- | --- |
+| 浏览器登录 | 仅 `HttpOnly` 会话 Cookie | **不变**：页面仍只用会话 Cookie |
+| 机器调用 | 不提供（被禁止） | **新增** `POST /api/auth/token` 签发 **Bearer JWT**，`Authorization: Bearer` 访问 `/api/**` |
+| 凭据存放 | 任何位置都不得出现 token | **限定为**：JWT 只经响应体一次性返回给调用方；页面**仍不写** `localStorage` |
+| 验签口径 | — | HS256，`alg` 白名单，`exp` 必填，`jti` 可撤销 |
+| 角色/班级 | 会话每次回库读 | **不变**：JWT 每次请求仍回库读 `role` / `class_id`，改库后同一令牌立即生效 |
+
+也就是说：**「客户端持有凭据」从「一律禁止」收窄为「页面禁止、API 允许」**。
+变更二的验收用例 `no-token-in-storage` 继续有效（它断言的是页面与登录响应），
+本变更新增 `SecretBoundaryTests` 与 A27/A30 覆盖新的边界。
+
+## 12. A1–A30 逐条结果
+
+`python tests/http_agent_acceptance.py` → **170 项检查 / 0 失败**，逐条：
+（每条都打印 `[PASS]` 判据，输出可直接重放）
+
+| # | 验收项 | 结果 | 关键判据 |
+| --- | --- | --- | --- |
+| A1 | 多应用并存 | ✅ | 同班 2 个应用，技能/材料各自不同；学生列表只见已启用 |
+| A2 | 会话锁定应用 | ✅ | 消息体塞另一个 `agent_id`，回答仍按会话锁定的应用 |
+| A3 | 提示词全文传递 | ✅ | system 首段与库中 `prompt` 逐字相等 |
+| A4 | 提示词为空回退 | ✅ | 空 `prompt` 仍 200 且有回答，首段为默认角色 |
+| A5 | 提示词超长 | ✅ | 2001 字 → 400，错误信息指出上限 |
+| A6 | 知识库不全量传递 | ✅ | 资料 ≤4 条、每条 ≤800 字，切片正文只在 user 消息里 |
+| A7 | 未命中不伪造 | ✅ | `citations=[]`、`status=no_evidence`、正文无 `[n]` |
+| A8 | 只查绑定材料 | ✅ | 未绑定材料里的词 → 空 hits |
+| A9 | 跨班不泄露 | ✅ | 集合检索 200 + 空；单体读取 404 且与他班同形 |
+| A10 | 技能只传命中项 | ✅ | 绑 3 个（实测绑 6 个）只出现 1 段说明 |
+| A11 | 技能元数据不入提示词 | ✅ | system 中搜不到「适用条件:」「工具:」「启用:」 |
+| A12 | 至多一个技能 | ✅ | 双命中 → `meta.skill` 只有一个 |
+| A13 | 停用立即生效 | ✅ | 不新建会话，同一会话下一次提问行为即变 |
+| A14 | 解析拒收 | ✅ | 缺字段/重复/非法工具/超长 均 400 |
+| A15 | 上传技能可用 | ✅ | 上传后可绑定并命中（`201` → 绑定 → `meta.skill`） |
+| A16 | 解题引导不给答案 | ✅ | system 含「不写最终答案…不写得数…不给完整解题过程」 |
+| A17 | SSE 增量 | ✅ | `meta → delta×n → done`，各 `delta` 拼接等于最终回答 |
+| A18 | 首事件前可报错 | ✅ | 未登录 401 / 会话不存在 404（非 200） |
+| A19 | MCP 服务自检 | ✅ | `/health` 200；带令牌 `tools/list` 2 个工具；`tools/call` 有文本 |
+| A20 | 登记不回传令牌 | ✅ | 响应只有 `token_configured: true` |
+| A21 | 连接发现 | ✅ | 页面可见工具名；错令牌 401 且原因可读 |
+| A22 | 断开即失效 | ✅ | 断开后同技能提问 → `denied` + 一条拒绝记录 |
+| A23 | 引用保存前校验 | ✅ | 清单外工具 / 未连接服务器 → 400 `unknown_tool` |
+| A24 | 调用真的发生 | ✅ | 回答含工具返回值 `12*(3+4) = 84` |
+| A25 | 循环与上限 | ✅ | 两步可两轮；上限=1 时收敛并用手头信息作答 |
+| A26 | 审计三态 | ✅ | 成功 / 被拒 / 出错 各一条 |
+| A27 | 密钥边界 | ✅ | 响应、页面、`localStorage`、Git 中无令牌原文 |
+| A28 | Swagger | ✅ | `/api/openapi.json` + `/api/docs` 可试调 |
+| A29 | 接口测试 | ✅ | `apitest/` 16 个脚本，`run_all.py` 出 HTML 报告 |
+| A30 | 公网可访问 | ⚠️ 部分 | 仓库 public 可匿名 `ls-remote`；本地提交已推送见 §15 |
+
+## 13. 任务 T1–T14 的 verify 实测
+
+`tasks.md` 的 42 条任务逐条执行自己的 `verify` 命令，**通过 41 条，未通过 1 条**：
+
+| 状态 | 数量 | 说明 |
+| --- | --- | --- |
+| `[x]` 已勾选 | 41 | 均有本轮真实回显（见 `_tools/mark_agent_tasks.py` 的运行输出） |
+| `[ ]` 未勾选 | 1 | 「PDF 验证报告」——本文件完成后由 `docs/AI应用平台验证报告.pdf` 闭合 |
+
+纪律：勾选前先跑 verify，失败的不勾。首轮跑出 2 条失败（`ACCEPTANCE.md` 未写取代关系、PDF 不存在），
+补完对应产物后重跑才勾选——没有「先勾后补」。
+
+## 14. 验证方式说明：替身验证 / 真实环境待复核
+
+与变更二同一套口径，逐条写清哪些是真跑、哪些是等价替身：
+
+| 环节 | 本轮做法 | 状态 |
+| --- | --- | --- |
+| 切分 / 路由 / 提示词组装 / 引用对齐 / SSE | 真实代码 | ✅ 真跑 |
+| 鉴权（JWT 签发验签撤销、跨班 404、角色 403） | 真实代码 | ✅ 真跑 |
+| MCP 服务端（`initialize` / `tools/list` / `tools/call`） | 真实代码，走真实 HTTP | ✅ 真跑 |
+| MCP 宿主循环（两轮上限、`denied`、审计三态） | 真实代码 | ✅ 真跑 |
+| 向量库 | `scripts/qdrant_stub.py` 内存替身（真算余弦、真做 `class_id` pre-filter 与 0.35 阈值） | ⚠️ 真实 Qdrant 待复核 |
+| 对话网关 / 嵌入网关 | 本地确定性替身（本机无课程网关凭证） | ⚠️ 真实网关待复核 |
+| `docker compose up` | 本机无 Docker，仅 `check_compose.py` 静态校验 14/14 | ⚠️ 未实跑 |
+
+**没有把替身结论写成真环境结论**：`docs/AI应用平台验证报告.pdf` 每个涉及替身的图表都带脚注。
+
+## 15. 未闭合项与归档说明
+
+1. **真实 Qdrant / 真实网关未复核**：需在课程环境配好 `QDRANT_URL`、`EMBEDDING_*`、`CHAT_*` 后重跑
+   `tests/http_agent_acceptance.py` 与 `tests/http_retrieval_acceptance.py`。
+2. **Docker Compose 端到端未实跑**：`docker-compose.yml` 已加 `qdrant` 服务与 `qdrant_storage` 卷，
+   但缺 Docker 运行时。归档前应在有 Docker 的机器上 `docker compose up -d && docker compose ps` 留证。
+3. **A30 公网可访问**：仓库 `https://github.com/titicacaSE/campusclaw` 为 public，可匿名读取；
+   但本轮新增提交需推送后才在远端可见（见下方提交号）。
+4. **归档状态**：本变更四件套仍在 `openspec/changes/add-agent-platform-mcp-tools/`，
+   `.openspec.yaml` 的 `status: implementing`。按规约「仍有未通过项时 MUST NOT 归档」，
+   **不归档**到 `openspec/specs/agent-platform/`。上述 1、2 两项闭合后，`status` 方可改 `verified` 再归档。
 
 ---
 

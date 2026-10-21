@@ -1,0 +1,21 @@
+<header class="topbar">
+  <span class="brand"><span class="brand__mark">C</span>
+    CampusClaw<span class="brand__sub">{{ klass }}</span></span>
+  <span class="spacer"></span>
+  <nav style="display:flex;gap:14px;align-items:center;margin-right:16px;font-size:14px">
+    <a href="{{ url_for('materials.page') }}">材料</a>
+    <a href="{{ url_for('search.page') }}">检索与问答</a>
+    <a href="{{ url_for('pages.agents_page') }}">AI 应用</a>
+    <a href="{{ url_for('pages.skills_page') }}">技能</a>
+    <a href="{{ url_for('pages.mcp_page') }}">MCP 工具</a>
+    <a href="{{ url_for('pages.chat_page') }}">对话</a>
+    <a href="{{ url_for('openapi.api_docs') }}" target="_blank" rel="noopener">接口文档</a>
+  </nav>
+  <span class="userbox">
+    {{ display_name }}
+    <span class="tag tag--{{ role }}">{{ '教师' if role == 'teacher' else '学生' }}</span>
+    <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
+      <button class="btn" type="submit" style="padding:5px 12px">退出</button>
+    </form>
+  </span>
+</header>

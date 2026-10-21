@@ -15,6 +15,12 @@ import re
 import sys
 from pathlib import Path
 
+# 控制台编码兜底：中文 Windows 的默认 stdout 编码是 GBK，输出 ✓ / ✗ 会直接抛
+# UnicodeEncodeError 把校验脚本打崩（看起来像「交付物不合格」，实际是编码问题）。
+# 统一改成 UTF-8；万一仍有无法编码的字符，降级替换而不中断校验。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parent.parent
 
 failures: list[str] = []
